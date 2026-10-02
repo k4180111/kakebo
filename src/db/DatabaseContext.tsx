@@ -1,24 +1,15 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { setupDatabase } from './index'; // Подключаем функцию с инициализацией и сидингом
-
-interface DatabaseContextType {
-  db: any;
-  isLoading: boolean;
-  error: string | null;
-  // Функция для принудительного перезапуска/обновления состояния UI при записи
-  refreshKey: number;
-  notifyDataChanged: () => void;
-}
-
-const DatabaseContext = createContext<DatabaseContextType | undefined>(undefined);
+import React, { useEffect, useState } from 'react';
+import { setupDatabase } from './index';
+import { DatabaseContext } from './context';
+import type { StorageMode } from './client';
 
 export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [db, setDb] = useState<any>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [storageMode, setStorageMode] = useState<StorageMode>('memory');
   const [refreshKey, setRefreshKey] = useState<number>(0);
 
-  // Триггер для уведомления компонентов о том, что данные в БД изменились
   const notifyDataChanged = () => {
     setRefreshKey((prev) => prev + 1);
   };
@@ -30,6 +21,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       .then((dbInstance) => {
         if (isMounted) {
           setDb(dbInstance);
+          setStorageMode(dbInstance.__storageMode ?? 'memory');
           setIsLoading(false);
         }
       })
@@ -47,17 +39,10 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   return (
-    <DatabaseContext.Provider value={{ db, isLoading, error, refreshKey, notifyDataChanged }}>
+    <DatabaseContext.Provider
+      value={{ db, isLoading, error, storageMode, refreshKey, notifyDataChanged }}
+    >
       {children}
     </DatabaseContext.Provider>
   );
-};
-
-// Пользовательский хук для использования БД в компонентах
-export const useDatabase = (): DatabaseContextType => {
-  const context = useContext(DatabaseContext);
-  if (!context) {
-    throw new Error('useDatabase должен использоваться внутри <DatabaseProvider>');
-  }
-  return context;
 };
