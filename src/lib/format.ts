@@ -47,3 +47,28 @@ export function formatDateLong(iso: string): string {
     weekday: 'short',
   });
 }
+
+export function daysInMonth(month: string): number {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+export function remainingDays(month: string): number {
+  const [y, m] = month.split('-').map(Number);
+  const total = daysInMonth(month);
+  const now = new Date();
+  const todayY = now.getFullYear();
+  const todayM = now.getMonth() + 1;
+  if (y < todayY || (y === todayY && m < todayM)) return 0;
+  if (y > todayY || (y === todayY && m > todayM)) return total;
+  return total - now.getDate() + 1;
+}
+
+export function pluralDays(n: number): string {
+  const abs = Math.abs(n);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} день`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} дня`;
+  return `${n} дней`;
+}

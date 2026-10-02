@@ -30,6 +30,7 @@ export interface MonthData {
   incomeCategories: Categories[];
   areas: Areas[];
   plan: CategoryPlanItem[];
+  error?: string;
 }
 
 export function useKakeiboMonth(month: string): MonthData | null {
@@ -55,7 +56,16 @@ export function useKakeiboMonth(month: string): MonthData | null {
       };
     } catch (err) {
       console.error('useKakeiboMonth error:', err);
-      return null;
+      return {
+        summary: null as any,
+        transactions: [],
+        categories: [],
+        expenseCategories: [],
+        incomeCategories: [],
+        areas: [],
+        plan: [],
+        error: err instanceof Error ? err.message : 'Ошибка загрузки данных',
+      };
     }
   }, [db, month, revision]);
 }

@@ -92,7 +92,7 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-        {tab === 'dashboard' && <DashboardView month={month} />}
+        {tab === 'dashboard' && <DashboardView month={month} onNavigate={(t) => setTab(t as TabId)} />}
         {tab === 'transactions' && <TransactionsView month={month} />}
         {tab === 'plan' && <PlanView month={month} />}
         {tab === 'reflection' && <ReflectionView month={month} />}

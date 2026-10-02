@@ -1,4 +1,15 @@
 // src/db/queries.ts
+//
+// Слой запросов поверх sqlite-wasm (oo1).
+//
+// ВАЖНО про API: установленная сборка @sqlite.org/sqlite-wasm НЕ предоставляет
+// sql.js-совместимый интерфейс (prepare -> step -> getAsObject -> free) — этих
+// методов у statement просто нет. Единственный переносимый способ прочитать
+// данные — db.exec с опциями:
+//   db.exec({ sql, bind, rowMode: 'object', returnRows: true })  // строки
+//   db.exec({ sql, bind, rowMode: 'array',  callback })          // скаляры
+// Вызов db.exec('SELECT ...') строкой возвращает только метаданные базы,
+// поэтому нигде ниже не используется.
 import type { Categories, MonthlyBudget, Areas } from './schema';
 
 // --- 1. Константы ключей категорий Kakeibo ---
@@ -9,19 +20,47 @@ export const KAKEIBO_CATEGORY_KEYS = {
   UNEXPECTED: 'unexpected',
 } as const;
 
-// --- 2. Сидинг дефолтных категорий и сфер ---
-export function seedInitialData(db: any) {
-  const areaCount = db.selectValue('SELECT COUNT(*) FROM areas');
-  if (areaCount > 0) return; // Уже заполнено
+// --- 2. Примитивы доступа ---
 
-  // Дефолтная сфера
-  const defaultAreaId = crypto.randomUUID();
+/** Все строки запроса в виде объектов. */
+function allRows<T>(db: any, sql: string, bind: ReadonlyArray<unknown> = []): T[] {
+  return db.exec({ sql, bind: bind as unknown[], rowMode: 'object', returnRows: true }) as T[];
+}
+
+/** Первая строка запроса либо null. */
+function firstRow<T>(db: any, sql: string, bind: ReadonlyArray<unknown> = []): T | null {
+  const rows = allRows<T>(db, sql, bind);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/** Первая колонка первой строки либо null. */
+function scalar(db: any, sql: string, bind: ReadonlyArray<unknown> = []): unknown {
+  let value: unknown = null;
   db.exec({
-    sql: 'INSERT INTO areas (id, enabled, key, name) VALUES (?, 1, ?, ?)',
-    bind: [defaultAreaId, 'default', 'Личные финансы'],
+    sql,
+    bind: bind as unknown[],
+    rowMode: 'array',
+    callback: (row: unknown[]) => {
+      value = row[0];
+    },
+  });
+  return value;
+}
+
+function scalarNumber(db: any, sql: string, bind: ReadonlyArray<unknown> = []): number {
+  const value = scalar(db, sql, bind);
+  return value === null || value === undefined ? 0 : Number(value) || 0;
+}
+
+// --- 3. Сидинг дефолтных категорий и сфер ---
+export function seedInitialData(db: any) {
+  if (scalarNumber(db, 'SELECT COUNT(*) FROM areas') > 0) return; // Уже заполнено
+
+  db.exec({
+    sql: 'INSERT OR IGNORE INTO areas (id, enabled, key, name) VALUES (?, 1, ?, ?)',
+    bind: [crypto.randomUUID(), 'default', 'Личные финансы'],
   });
 
-  // Категории Kakeibo
   const initialCategories = [
     { key: KAKEIBO_CATEGORY_KEYS.NEEDS, name: 'Потребности', is_income: 0 },
     { key: KAKEIBO_CATEGORY_KEYS.WANTS, name: 'Желания', is_income: 0 },
@@ -32,122 +71,87 @@ export function seedInitialData(db: any) {
 
   for (const cat of initialCategories) {
     db.exec({
-      sql: 'INSERT INTO categories (id, enabled, key, name, is_income) VALUES (?, 1, ?, ?, ?)',
+      sql: 'INSERT OR IGNORE INTO categories (id, enabled, key, name, is_income) VALUES (?, 1, ?, ?, ?)',
       bind: [crypto.randomUUID(), cat.key, cat.name, cat.is_income],
     });
   }
 }
 
-// --- 3. Получение справочников ---
+// --- 4. Справочники ---
 export function getCategories(db: any): Categories[] {
-  const stmt = db.prepare('SELECT * FROM categories WHERE enabled = 1');
-  const categories: Categories[] = [];
-  while (stmt.step()) {
-    categories.push(stmt.getAsObject() as Categories);
-  }
-  stmt.free();
-  return categories;
+  return allRows<Categories>(
+    db,
+    'SELECT * FROM categories WHERE enabled = 1 ORDER BY is_income, name',
+  );
 }
 
 export function getAreas(db: any): Areas[] {
-  const stmt = db.prepare('SELECT * FROM areas WHERE enabled = 1');
-  const areas: Areas[] = [];
-  while (stmt.step()) {
-    areas.push(stmt.getAsObject() as Areas);
-  }
-  stmt.free();
-  return areas;
+  return allRows<Areas>(db, 'SELECT * FROM areas WHERE enabled = 1 ORDER BY name');
 }
 
-// --- 4. Транзакции (Расходы и Доходы) ---
+// --- 5. Транзакции (расходы и доходы) ---
 export interface CreateTransactionDto {
   amount: number;
   is_income: number;
   area_id: string;
   category_id: string;
   description?: string;
-  date?: string; // YYYY-MM-DD HH:mm:ss
+  date?: string; // 'YYYY-MM-DD' либо 'YYYY-MM-DD HH:MM:SS'
+}
+
+export interface TransactionRow {
+  id: string;
+  date: string;
+  is_income: number;
+  amount: number;
+  description: string | null;
+  category_name: string;
+  category_key: string;
+  area_name: string;
 }
 
 export function addTransaction(db: any, dto: CreateTransactionDto): string {
   const id = crypto.randomUUID();
-  const date = dto.date || new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const date = dto.date || new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   db.exec({
-    sql: `INSERT INTO transactions (id, date, is_income, amount, area_id, category_id, description) 
+    sql: `INSERT INTO transactions (id, date, is_income, amount, area_id, category_id, description)
           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    bind: [id, date, dto.is_income, dto.amount, dto.area_id, dto.category_id, dto.description || null],
+    bind: [id, date, dto.is_income, dto.amount, dto.area_id, dto.category_id, dto.description ?? null],
   });
 
   return id;
 }
 
-export function getMonthlyTransactions(db: any, month: string) {
-  // month = '2026-10'
-  const stmt = db.prepare(`
-    SELECT 
-      t.id, t.date, t.is_income, t.amount, t.description,
-      c.name as category_name, c.key as category_key,
-      a.name as area_name
-    FROM transactions t
-    JOIN categories c ON t.category_id = c.id
-    JOIN areas a ON t.area_id = a.id
-    WHERE strftime('%Y-%m', t.date) = ?
-    ORDER BY t.date DESC
-  `);
-
-  stmt.bind([month]);
-  const transactions: any[] = [];
-  while (stmt.step()) {
-    transactions.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return transactions;
+export function deleteTransaction(db: any, id: string) {
+  db.exec({ sql: 'DELETE FROM transactions WHERE id = ?', bind: [id] });
 }
 
-// --- 5. Бюджет на месяц и Расчет Kakeibo ---
-export function getOrCreateMonthlyBudget(
-  db: any, 
-  month: string, 
-  defaults = { income: 0, fixed: 0, savings: 0 }
-): MonthlyBudget {
-  const stmt = db.prepare('SELECT * FROM monthly_budget WHERE month = ?');
-  stmt.bind([month]);
-  
-  if (stmt.step()) {
-    const budget = stmt.getAsObject() as MonthlyBudget;
-    stmt.free();
-    return budget;
-  }
-  stmt.free();
-
-  // Если бюджета нет, создаем
-  const id = crypto.randomUUID();
-  db.exec({
-    sql: `INSERT INTO monthly_budget (id, month, income_plan, fixed_expenses, savings_goal) 
-          VALUES (?, ?, ?, ?, ?)`,
-    bind: [id, month, defaults.income, defaults.fixed, defaults.savings],
-  });
-
-  return {
-    id,
-    month,
-    income_plan: defaults.income,
-    fixed_expenses: defaults.fixed,
-    savings_goal: defaults.savings,
-  };
+/** Все операции месяца, новые даты сверху. */
+export function getMonthlyTransactions(db: any, month: string): TransactionRow[] {
+  return allRows<TransactionRow>(
+    db,
+    `SELECT
+       t.id, t.date, t.is_income, t.amount, t.description,
+       c.name AS category_name, c.key AS category_key,
+       a.name AS area_name
+     FROM transactions t
+     JOIN categories c ON c.id = t.category_id
+     JOIN areas a ON a.id = t.area_id
+     WHERE substr(t.date, 1, 7) = ?
+     ORDER BY t.date DESC, t.rowid DESC`,
+    [month],
+  );
 }
 
-// --- 5b. Только чтение бюджета (без побочных записей) ---
+// --- 6. Бюджет месяца ---
+
+/** Только чтение — не создаёт строк побочно. */
 export function getMonthlyBudget(db: any, month: string): MonthlyBudget | null {
-  const stmt = db.prepare('SELECT * FROM monthly_budget WHERE month = ?');
-  stmt.bind([month]);
-  const budget = stmt.step() ? (stmt.getAsObject() as MonthlyBudget) : null;
-  stmt.free();
-  return budget;
+  return firstRow<MonthlyBudget>(db, 'SELECT * FROM monthly_budget WHERE month = ?', [month]);
 }
 
-// План месяца создаётся/обновляется только по действию пользователя
+/** План месяца создаётся/обновляется только действием пользователя. */
 export function upsertMonthlyBudgetPlan(
   db: any,
   month: string,
@@ -164,6 +168,32 @@ export function upsertMonthlyBudgetPlan(
     bind: [id, month, data.income_plan, data.fixed_expenses, data.savings_goal],
   });
   return getMonthlyBudget(db, month)!.id;
+}
+
+/** Совместимость со старым кодом: вернуть план, создав пустой при отсутствии. */
+export function getOrCreateMonthlyBudget(
+  db: any,
+  month: string,
+  defaults = { income: 0, fixed: 0, savings: 0 },
+): MonthlyBudget {
+  const existing = getMonthlyBudget(db, month);
+  if (existing) return existing;
+
+  const id = upsertMonthlyBudgetPlan(db, month, {
+    income_plan: defaults.income,
+    fixed_expenses: defaults.fixed,
+    savings_goal: defaults.savings,
+  });
+
+  return (
+    getMonthlyBudget(db, month) ?? {
+      id,
+      month,
+      income_plan: defaults.income,
+      fixed_expenses: defaults.fixed,
+      savings_goal: defaults.savings,
+    }
+  );
 }
 
 export function updateBudgetReflections(
@@ -190,7 +220,7 @@ export function updateBudgetReflections(
   });
 }
 
-// --- 5c. План расходов по корзинам ---
+// --- 7. План расходов по корзинам ---
 export interface CategoryPlanItem {
   id: string;
   month_budget_id: string;
@@ -201,21 +231,16 @@ export interface CategoryPlanItem {
 }
 
 export function getCategoryPlan(db: any, month: string): CategoryPlanItem[] {
-  const stmt = db.prepare(`
-    SELECT ep.id, ep.month_budget_id, ep.expense_category_id AS category_id,
-           ep.amount, c.name AS category_name, c.key AS category_key
-    FROM monthly_budget__expenses_plan ep
-    JOIN categories c ON c.id = ep.expense_category_id
-    JOIN monthly_budget mb ON mb.id = ep.month_budget_id
-    WHERE mb.month = ?
-  `);
-  stmt.bind([month]);
-  const items: CategoryPlanItem[] = [];
-  while (stmt.step()) {
-    items.push(stmt.getAsObject() as CategoryPlanItem);
-  }
-  stmt.free();
-  return items;
+  return allRows<CategoryPlanItem>(
+    db,
+    `SELECT ep.id, ep.month_budget_id, ep.expense_category_id AS category_id,
+            ep.amount, c.name AS category_name, c.key AS category_key
+     FROM monthly_budget__expenses_plan ep
+     JOIN categories c ON c.id = ep.expense_category_id
+     JOIN monthly_budget mb ON mb.id = ep.month_budget_id
+     WHERE mb.month = ?`,
+    [month],
+  );
 }
 
 export function saveCategoryPlan(db: any, monthBudgetId: string, plan: Record<string, number>) {
@@ -234,11 +259,7 @@ export function saveCategoryPlan(db: any, monthBudgetId: string, plan: Record<st
   }
 }
 
-export function deleteTransaction(db: any, id: string) {
-  db.exec({ sql: 'DELETE FROM transactions WHERE id = ?', bind: [id] });
-}
-
-// Расчет агрегированной аналитики Kakeibo за месяц
+// --- 8. Агрегированная аналитика Kakeibo за месяц ---
 export interface KakeiboSummary {
   budget: MonthlyBudget | null;
   incomeActual: number;
@@ -251,25 +272,14 @@ export interface KakeiboSummary {
 }
 
 export function getKakeiboSummary(db: any, month: string): KakeiboSummary {
-  // Только чтение — бюджет создаёт явное действие пользователя
   const budget = getMonthlyBudget(db, month);
 
-  const incomeStmt = db.prepare(
-    "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE strftime('%Y-%m', date) = ? AND is_income = 1",
+  const incomeActual = scalarNumber(
+    db,
+    `SELECT COALESCE(SUM(amount), 0) FROM transactions
+     WHERE substr(date, 1, 7) = ? AND is_income = 1`,
+    [month],
   );
-  incomeStmt.bind([month]);
-  const incomeActual = incomeStmt.step() ? Number(incomeStmt.get(0)) || 0 : 0;
-  incomeStmt.free();
-
-  // Считаем сумму фактических расходов по категориям Kakeibo
-  const stmt = db.prepare(`
-    SELECT c.key, SUM(t.amount) as total
-    FROM transactions t
-    JOIN categories c ON t.category_id = c.id
-    WHERE strftime('%Y-%m', t.date) = ? AND t.is_income = 0
-    GROUP BY c.key
-  `);
-  stmt.bind([month]);
 
   const spentByCategory: Record<string, number> = {
     needs: 0,
@@ -278,27 +288,33 @@ export function getKakeiboSummary(db: any, month: string): KakeiboSummary {
     unexpected: 0,
   };
 
+  const byKey = allRows<{ key: string; total: number | string }>(
+    db,
+    `SELECT c.key AS key, SUM(t.amount) AS total
+     FROM transactions t
+     JOIN categories c ON c.id = t.category_id
+     WHERE substr(t.date, 1, 7) = ? AND t.is_income = 0
+     GROUP BY c.key`,
+    [month],
+  );
+
   let totalSpent = 0;
-  while (stmt.step()) {
-    const row = stmt.getAsObject();
-    const key = row.key as string;
+  for (const row of byKey) {
     const amount = Number(row.total) || 0;
-    spentByCategory[key] = amount;
+    spentByCategory[row.key] = (spentByCategory[row.key] ?? 0) + amount;
     totalSpent += amount;
   }
-  stmt.free();
 
   const planByCategory: Record<string, number> = {};
   for (const item of getCategoryPlan(db, month)) {
     planByCategory[item.category_key] = Number(item.amount) || 0;
   }
 
-  // Формула Kakeibo: Доступный лимит = Доход - Фиксированные расходы - Цель сбережений
-  const incomePlan = budget?.income_plan ?? 0;
-  const fixedExpenses = budget?.fixed_expenses ?? 0;
-  const savingsGoal = budget?.savings_goal ?? 0;
+  // Формула Какейбо: доступный лимит = доход − обязательные платежи − цель сбережений
+  const incomePlan = Number(budget?.income_plan ?? 0);
+  const fixedExpenses = Number(budget?.fixed_expenses ?? 0);
+  const savingsGoal = Number(budget?.savings_goal ?? 0);
   const availableBudget = incomePlan - fixedExpenses - savingsGoal;
-  const remainingBudget = availableBudget - totalSpent;
 
   return {
     budget,
@@ -307,12 +323,12 @@ export function getKakeiboSummary(db: any, month: string): KakeiboSummary {
     spentByCategory,
     planByCategory,
     availableBudget,
-    remainingBudget,
+    remainingBudget: availableBudget - totalSpent,
     savedActual: incomeActual - totalSpent,
   };
 }
 
-// --- 6. История по месяцам ---
+// --- 9. История по месяцам ---
 export interface MonthlyHistoryRow {
   month: string;
   income: number;
@@ -322,23 +338,32 @@ export interface MonthlyHistoryRow {
 }
 
 export function getMonthlyHistory(db: any, limit = 12): MonthlyHistoryRow[] {
-  const stmt = db.prepare(`
-    SELECT strftime('%Y-%m', t.date) AS month,
-      COALESCE(SUM(CASE WHEN t.is_income = 1 THEN t.amount ELSE 0 END), 0) AS income,
-      COALESCE(SUM(CASE WHEN t.is_income = 0 THEN t.amount ELSE 0 END), 0) AS expense,
-      COALESCE(mb.income_plan, 0)  AS income_plan,
-      COALESCE(mb.savings_goal, 0) AS savings_goal
-    FROM transactions t
-    LEFT JOIN monthly_budget mb ON mb.month = strftime('%Y-%m', t.date)
-    GROUP BY month
-    ORDER BY month DESC
-    LIMIT ?
-  `);
-  stmt.bind([limit]);
-  const rows: MonthlyHistoryRow[] = [];
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject() as MonthlyHistoryRow);
-  }
-  stmt.free();
-  return rows;
+  const rows = allRows<{
+    month: string;
+    income: number | string;
+    expense: number | string;
+    income_plan: number | string;
+    savings_goal: number | string;
+  }>(
+    db,
+    `SELECT substr(t.date, 1, 7) AS month,
+       COALESCE(SUM(CASE WHEN t.is_income = 1 THEN t.amount ELSE 0 END), 0) AS income,
+       COALESCE(SUM(CASE WHEN t.is_income = 0 THEN t.amount ELSE 0 END), 0) AS expense,
+       COALESCE(mb.income_plan, 0)  AS income_plan,
+       COALESCE(mb.savings_goal, 0) AS savings_goal
+     FROM transactions t
+     LEFT JOIN monthly_budget mb ON mb.month = substr(t.date, 1, 7)
+     GROUP BY month
+     ORDER BY month DESC
+     LIMIT ?`,
+    [limit],
+  );
+
+  return rows.map((r) => ({
+    month: r.month,
+    income: Number(r.income) || 0,
+    expense: Number(r.expense) || 0,
+    income_plan: Number(r.income_plan) || 0,
+    savings_goal: Number(r.savings_goal) || 0,
+  }));
 }
