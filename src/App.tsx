@@ -259,6 +259,7 @@ function App() {
   const [error, setError] = useState('');
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<MoneyTransaction | null>(null);
+  const [sphereRemaindersOpen, setSphereRemaindersOpen] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [monthPickerYear, setMonthPickerYear] = useState(() => Number(month.split('-')[0]));
   const monthSwitcherRef = useRef<HTMLDivElement>(null);
@@ -278,6 +279,7 @@ function App() {
     .reduce((sum, item) => sum + item.amount, 0);
   const plannedIncome = plan.incomeItems.reduce((sum, item) => sum + item.amount, 0);
   const plannedExpenses = plan.expenseItems.reduce((sum, item) => sum + item.amount, 0);
+  const isBudgetConfigured = plan.incomeItems.length > 0 || plan.expenseItems.length > 0 || plan.savingsGoal > 0;
   const spendingLimit = Math.max(0, plannedIncome - plannedExpenses - plan.savingsGoal);
   const remaining = spendingLimit - totalSpent;
   const progress = spendingLimit > 0 ? Math.min(100, (totalSpent / spendingLimit) * 100) : 0;
@@ -486,6 +488,28 @@ function App() {
     result[sphere] = (result[sphere] ?? 0) + item.amount;
     return result;
   }, {});
+  const sphereRemainders = settings.spheres.map((sphere) => {
+    const allocation = plan.sphereAllocations.find((item) => item.sphereId === sphere.id);
+    const allocated = allocation?.percentage === undefined
+      ? allocation?.amount ?? 0
+      : Math.round(spendingLimit * allocation.percentage / 100);
+    const spent = sphereTotals[sphere.id] ?? 0;
+    return { id: sphere.id, name: sphere.name, color: sphere.color ?? defaultSphereColors[0], allocated, spent, remaining: allocated - spent };
+  });
+  if ((sphereTotals.unassigned ?? 0) > 0) {
+    const spent = sphereTotals.unassigned;
+    sphereRemainders.push({
+      id: 'unassigned',
+      name: 'Сфера не указана',
+      color: '#c7c5bb',
+      allocated: 0,
+      spent,
+      remaining: -spent,
+    });
+  }
+  const hasSphereAllocations = plan.sphereAllocations.some((allocation) => (
+    settings.spheres.some((sphere) => sphere.id === allocation.sphereId)
+  ));
 
   return (
     <div className="app-shell">
@@ -604,7 +628,57 @@ function App() {
                     <p>{remaining >= 0 ? 'осталось на переменные расходы' : 'превышение плана расходов'}</p>
                     <div className="progress-label"><span>Потрачено {formatMoney(totalSpent)} ₽</span><span>Лимит {formatMoney(spendingLimit)} ₽</span></div>
                     <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-                    <button className="hero-link" onClick={() => setPlanOpen(true)}>Настроить бюджет <ArrowRight size={15} /></button>
+                    <button
+                      className="hero-sphere-toggle"
+                      type="button"
+                      aria-expanded={sphereRemaindersOpen}
+                      aria-controls="hero-sphere-remainders"
+                      onClick={() => setSphereRemaindersOpen((open) => !open)}
+                    >
+                      Остатки по сферам
+                      <ChevronDown size={14} className={sphereRemaindersOpen ? 'expanded' : ''} />
+                    </button>
+                    {sphereRemaindersOpen && (
+                      <div className={`hero-sphere-remainders ${!isBudgetConfigured || !hasSphereAllocations ? 'hero-sphere-remainders-notice' : ''}`} id="hero-sphere-remainders">
+                        {!isBudgetConfigured ? (
+                          <button className="hero-budget-notice hero-sphere-notice" type="button" onClick={() => setActiveTab('plan')}>
+                            <span>Заполните план бюджета на этот месяц</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        ) : !hasSphereAllocations ? (
+                          <button className="hero-budget-notice hero-sphere-notice" type="button" onClick={() => setActiveTab('plan')}>
+                            <span>Настройте распределение бюджета по сферам</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        ) : sphereRemainders.map((sphere) => {
+                          const spentProgress = sphere.allocated > 0
+                            ? Math.min(100, sphere.spent / sphere.allocated * 100)
+                            : sphere.spent > 0 ? 100 : 0;
+                          const progressMaximum = Math.max(sphere.allocated, sphere.spent, 1);
+                          return (
+                            <div className="hero-sphere-remainder" key={sphere.id}>
+                              <div className="hero-sphere-remainder-heading">
+                                <span className="hero-sphere-name"><span className="hero-sphere-dot" style={{ backgroundColor: sphere.color }} />{sphere.name}</span>
+                                <strong className={sphere.remaining < 0 ? 'over-budget' : ''}>{formatMoney(sphere.remaining)} ₽</strong>
+                              </div>
+                              <div className="progress-label">
+                                <span>Потрачено {formatMoney(sphere.spent)} ₽</span>
+                                <span>Лимит {formatMoney(sphere.allocated)} ₽</span>
+                              </div>
+                              <div className="progress-track" role="progressbar" aria-label={`Потрачено в сфере «${sphere.name}»`} aria-valuemin={0} aria-valuemax={progressMaximum} aria-valuenow={Math.min(sphere.spent, progressMaximum)}>
+                                <span className={sphere.remaining < 0 ? 'over-budget' : ''} style={{ width: `${spentProgress}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {!isBudgetConfigured && !sphereRemaindersOpen && (
+                      <button className="hero-budget-notice" type="button" onClick={() => setActiveTab('plan')}>
+                        <span>Заполните план бюджета на этот месяц</span>
+                        <ArrowRight size={15} />
+                      </button>
+                    )}
                   </div>
                   <div className="hero-art" aria-hidden="true">
                     <div className="sun" />
