@@ -49,10 +49,22 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .breadcrumb { color: #898b82; font-size: 9px; letter-spacing: 1px; }
 .breadcrumb span { margin: 0 8px; color: #c9c9bf; }
 .topbar-actions { display: flex; align-items: center; gap: 19px; }
-.month-switcher { display: flex; align-items: center; gap: 11px; }
-.month-switcher span { min-width: 112px; color: #4d5048; font-size: 12px; font-weight: 600; text-align: center; text-transform: capitalize; }
+.month-switcher { position: relative; display: flex; align-items: center; gap: 11px; }
+.month-switcher .month-picker-trigger { display: block; width: auto; min-width: 112px; height: auto; padding: 5px 8px; color: #4d5048; font-size: 12px; font-weight: 600; text-align: center; text-transform: capitalize; border-color: transparent; background: transparent; white-space: nowrap; }
+.month-switcher .month-picker-trigger:hover, .month-switcher .month-picker-trigger[aria-expanded="true"] { color: var(--green-dark); border-color: #e7eadf; background: #f4f6f0; }
 .month-switcher button, .icon-button { display: grid; width: 28px; height: 28px; place-items: center; color: #73766e; border: 1px solid #ebeae3; border-radius: 8px; background: #fffefa; }
 .month-switcher button:hover, .icon-button:hover { color: var(--green); background: #f4f6f0; }
+.month-switcher .month-picker-trigger { display: block; }
+.month-picker { position: absolute; z-index: 10; top: calc(100% + 9px); left: 50%; width: 248px; padding: 12px; border: 1px solid #e8e7df; border-radius: 12px; background: #fffefa; box-shadow: 0 12px 30px #283b281c; transform: translateX(-50%); }
+.month-picker-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.month-picker-heading strong { color: #4d5048; font: 700 13px Manrope, sans-serif; }
+.month-picker .month-picker-heading button { width: 27px; height: 27px; }
+.month-picker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.month-picker .month-picker-grid button { width: auto; height: 32px; color: #62645c; font-size: 10px; text-transform: capitalize; border-color: transparent; background: transparent; }
+.month-picker .month-picker-grid button:hover { color: #456348; border-color: #dce6d7; background: #f2f5ee; }
+.month-picker .month-picker-grid button.selected { color: #456348; font-weight: 700; border-color: #dce6d7; background: #e9efe4; }
+.month-picker .month-picker-current { display: block; width: 100%; height: 34px; margin-top: 9px; color: #547553; font-size: 10px; font-weight: 600; border-color: #e5ebdf; background: #f5f7f1; }
+.month-picker .month-picker-current:hover { color: #3e6247; border-color: #d4e0cd; background: #edf3e9; }
 .avatar { width: 33px; height: 33px; color: #416047; font: 700 13px Manrope, sans-serif; border: 1px solid #dce5d9; border-radius: 50%; background: #edf3e9; }
 .page-content { max-width: 1270px; padding: 35px 48px 22px; margin: 0 auto; }
 .welcome-row, .section-title-row { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
@@ -108,7 +120,11 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .subtle-button, .category-footer { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; color: #6f8b69; font-size: 9px; border: 0; background: transparent; white-space: nowrap; }
 .subtle-button:hover, .category-footer:hover { color: var(--green-dark); }
 .transaction-list { display: grid; }
+.transaction-list-grouped { gap: 12px; }
+.transaction-list-grouped .transaction-day { min-width: 0; padding: 14px 20px; border: 1px solid #ecebe4; border-radius: 12px; background: var(--paper); }
+.transaction-day-heading { margin: 0; padding: 1px 0 6px; color: #718267; font-size: 10px; font-weight: 700; }
 .transaction-row { display: flex; align-items: center; gap: 11px; min-height: 56px; border-bottom: 1px solid #f0efe9; }
+.transaction-day .transaction-row:last-child { border-bottom: 0; }
 .transaction-row:last-child { border-bottom: 0; }
 .transaction-symbol { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border-radius: 9px; }
 .expense-symbol { color: #aa7959; background: #f8eee6; }
@@ -120,8 +136,9 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .transaction-category svg { width: 11px; height: 11px; color: #7b8d72; }
 .transaction-value { color: #35382f; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .transaction-value.positive { color: #54805c; }
-.delete-button { width: 25px; height: 25px; color: #a5a69c; border-color: transparent; opacity: .25; }
-.transaction-row:hover .delete-button, .delete-button:focus-visible { opacity: 1; }
+.edit-button, .delete-button { width: 25px; height: 25px; color: #a5a69c; border-color: transparent; opacity: .25; }
+.transaction-row:hover .edit-button, .transaction-row:hover .delete-button, .edit-button:focus-visible, .delete-button:focus-visible { opacity: 1; }
+.edit-button:hover { color: #547553; background: #eff5ec; }
 .delete-button:hover { color: #a44f46; background: #fbefec; }
 .empty-state { padding: 23px 8px; color: #999b92; font-size: 10px; line-height: 1.6; text-align: center; }
 .panel-icon { display: grid; width: 26px; height: 26px; place-items: center; color: #829078; border: 1px solid #efeee8; border-radius: 7px; }
@@ -146,7 +163,7 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .content-section { min-height: calc(100vh - 153px); padding-top: 2px; }
 .section-title-row { margin-bottom: 25px; }
 .section-title-row h1 { margin-bottom: 6px; }
-.history-panel { padding: 11px 22px; }
+.history-panel { padding: 0; border: 0; background: transparent; }
 .history-panel .transaction-row { min-height: 68px; }
 .history-panel .transaction-description strong, .history-panel .transaction-value { font-size: 12px; }
 .history-panel .transaction-description small { font-size: 10px; }
@@ -293,8 +310,12 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .plan-item-headings { padding: 0 0 7px; color: #74766d; font-size: 9px; font-weight: 600; }
 .plan-item-fields { padding: 0 0 8px; }
 .plan-item-fields > input, .plan-item-fields > select { width: 100%; min-width: 0; height: 40px; padding: 0 9px; color: #4e5148; font-size: 10px; border: 1px solid #e9e8e0; border-radius: 8px; background: #fffefa; }
+.plan-item-fields > input[aria-label*="сумма"] { text-align: right; }
 .plan-date-field { position: relative; display: block; width: 100%; min-width: 0; height: 40px; overflow: hidden; border: 1px solid #e9e8e0; border-radius: 8px; background: #fffefa; }
-.plan-date-display { display: flex; height: 100%; align-items: center; justify-content: space-between; gap: 4px; padding: 0 7px; color: #4e5148; font-size: 9px; white-space: nowrap; pointer-events: none; }
+.plan-date-display { display: flex; height: 100%; align-items: center; justify-content: space-between; gap: 4px; padding: 0 7px; color: #4e5148; font-size: 11px; white-space: nowrap; pointer-events: none; }
+.plan-date-display { justify-content: flex-end; }
+.plan-date-display span { flex: 0 1 auto; text-align: right; }
+.plan-item-fields .plan-date-display { font-size: 10px; }
 .plan-date-display svg { flex: 0 0 auto; color: #829570; }
 .plan-date-field input[type="date"] { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; opacity: .01; cursor: pointer; }
 .plan-date-field:focus-within { border-color: #a8b99e; outline: 2px solid #a8b99e33; }
@@ -347,7 +368,7 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
   .breadcrumb { max-width: 100px; overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
   .topbar-actions { gap: 8px; }
   .month-switcher { gap: 5px; }
-  .month-switcher span { min-width: 94px; font-size: 10px; }
+  .month-switcher .month-picker-trigger { min-width: 94px; padding: 4px 3px; font-size: 10px; }
   .month-switcher button { width: 25px; height: 25px; }
   .avatar { width: 29px; height: 29px; }
   .page-content { padding: 24px 14px 15px; }
@@ -365,6 +386,8 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
   .summary-card strong { margin-top: 8px; }
   .lower-grid { gap: 11px; margin-top: 11px; }
   .panel { padding: 15px; }
+  .history-panel { padding: 0; }
+  .transaction-list-grouped .transaction-day { padding: 12px 14px; }
   .panel-heading { gap: 8px; }
   .subtle-button { font-size: 8px; }
   .category-row { grid-template-columns: 8px minmax(0, 1fr) auto 29px; gap: 6px; }
@@ -396,6 +419,6 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
   .plan-item-headings, .plan-item-fields { min-width: 590px; gap: 6px; }
   .plan-item-fields > input, .plan-item-fields > select { height: 36px; padding: 0 5px; font-size: 9px; }
   .plan-date-field { height: 36px; }
-  .plan-date-display { padding: 0 5px; font-size: 8px; }
+  .plan-item-fields .plan-date-display { padding: 0 5px; font-size: 9px; }
   .plan-date-display svg { width: 12px; height: 12px; }
 }

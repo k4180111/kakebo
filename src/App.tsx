@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -40,6 +40,7 @@ import {
   Pill,
   PiggyBank,
   Plane,
+  Pencil,
   Plus,
   Receipt,
   Save,
@@ -257,6 +258,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<MoneyTransaction | null>(null);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [monthPickerYear, setMonthPickerYear] = useState(() => Number(month.split('-')[0]));
+  const monthSwitcherRef = useRef<HTMLDivElement>(null);
   const [planOpen, setPlanOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupError, setBackupError] = useState('');
@@ -301,6 +306,24 @@ function App() {
         setError(reason instanceof Error ? reason.message : 'Не удалось загрузить настройки.');
       });
   }, []);
+
+  useEffect(() => {
+    if (!monthPickerOpen) return undefined;
+    function dismissPicker(event: PointerEvent) {
+      if (event.target instanceof Node && !monthSwitcherRef.current?.contains(event.target)) {
+        setMonthPickerOpen(false);
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMonthPickerOpen(false);
+    }
+    document.addEventListener('pointerdown', dismissPicker);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', dismissPicker);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [monthPickerOpen]);
 
   async function persistSettings(next: AppSettings) {
     await saveSettings(next);
@@ -383,6 +406,7 @@ function App() {
     await saveTransaction(transaction);
     setTransactions((current) => [transaction, ...current.filter((item) => item.id !== transaction.id)]);
     setTransactionOpen(false);
+    setEditingTransaction(null);
   }
 
   async function handleDeleteTransaction(id: string) {
@@ -496,10 +520,64 @@ function App() {
         <header className="topbar">
           <div className="breadcrumb">ЛИЧНЫЕ ФИНАНСЫ <span>/</span> {selectedTab.toUpperCase()}</div>
           <div className="topbar-actions">
-            <div className="month-switcher">
+            <div className="month-switcher" ref={monthSwitcherRef}>
               <button aria-label="Предыдущий месяц" onClick={() => shiftMonth(-1)}><ArrowLeft size={16} /></button>
-              <span>{formatMonth(month)}</span>
+              <button
+                className="month-picker-trigger"
+                type="button"
+                aria-label={`Выбрать месяц, сейчас ${formatMonth(month)}`}
+                aria-haspopup="dialog"
+                aria-expanded={monthPickerOpen}
+                onClick={() => {
+                  setMonthPickerYear(Number(month.split('-')[0]));
+                  setMonthPickerOpen((open) => !open);
+                }}
+              >
+                {formatMonth(month)}
+              </button>
               <button aria-label="Следующий месяц" onClick={() => shiftMonth(1)}><ArrowRight size={16} /></button>
+              {monthPickerOpen && (
+                <div className="month-picker" role="dialog" aria-label="Выбор месяца">
+                  <div className="month-picker-heading">
+                    <button type="button" aria-label="Предыдущий год" onClick={() => setMonthPickerYear((year) => year - 1)}><ArrowLeft size={14} /></button>
+                    <strong>{monthPickerYear}</strong>
+                    <button type="button" aria-label="Следующий год" onClick={() => setMonthPickerYear((year) => year + 1)}><ArrowRight size={14} /></button>
+                  </div>
+                  <div className="month-picker-grid">
+                    {Array.from({ length: 12 }, (_, index) => {
+                      const value = `${monthPickerYear}-${String(index + 1).padStart(2, '0')}`;
+                      const label = new Intl.DateTimeFormat('ru-RU', { month: 'short' })
+                        .format(new Date(monthPickerYear, index, 1)).replace('.', '');
+                      return (
+                        <button
+                          type="button"
+                          className={value === month ? 'selected' : ''}
+                          aria-pressed={value === month}
+                          key={value}
+                          onClick={() => {
+                            setMonth(value);
+                            setMonthPickerOpen(false);
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    className="month-picker-current"
+                    type="button"
+                    onClick={() => {
+                      const currentMonth = monthKey(new Date());
+                      setMonth(currentMonth);
+                      setMonthPickerYear(Number(currentMonth.split('-')[0]));
+                      setMonthPickerOpen(false);
+                    }}
+                  >
+                    Текущий месяц
+                  </button>
+                </div>
+              )}
             </div>
             <button className="avatar" aria-label="Открыть настройки" onClick={() => setActiveTab('settings')}>K</button>
           </div>
@@ -562,7 +640,7 @@ function App() {
                 <section className="lower-grid">
                   <article className="panel recent-panel">
                     <div className="panel-heading"><div><h3>Последние операции</h3><p>Ваши финансовые решения за месяц</p></div><button className="subtle-button" onClick={() => setActiveTab('history')}>Все операции <ArrowRight size={15} /></button></div>
-                    <TransactionRows items={monthTransactions.slice(0, 5)} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} onDelete={handleDeleteTransaction} />
+                    <TransactionRows items={monthTransactions.slice(0, 5)} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} />
                   </article>
                   <article className="panel category-panel">
                     <div className="panel-heading"><div><h3>Куда уходят деньги</h3><p>Два независимых взгляда на расходы</p></div><span className="panel-icon"><ChevronDown size={16} /></span></div>
@@ -617,8 +695,8 @@ function App() {
             )}
             {activeTab === 'history' && (
               <section className="content-section">
-                <div className="section-title-row"><div><p className="eyebrow">ВАША ИСТОРИЯ</p><h1>Операции</h1><p className="welcome-copy">Каждая запись помогает лучше понять свои привычки.</p></div><button className="primary-button" onClick={() => setTransactionOpen(true)}><Plus size={18} /> Добавить запись</button></div>
-                <div className="panel history-panel"><TransactionRows items={monthTransactions} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} onDelete={handleDeleteTransaction} /></div>
+                <div className="section-title-row"><div><p className="eyebrow">ВАША ИСТОРИЯ</p><h1>Операции</h1><p className="welcome-copy">Каждая запись помогает лучше понять свои привычки.</p></div><button className="primary-button" onClick={() => { setEditingTransaction(null); setTransactionOpen(true); }}><Plus size={18} /> Добавить запись</button></div>
+                <div className="panel history-panel"><TransactionRows items={monthTransactions} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} groupByDay onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} /></div>
               </section>
             )}
             {activeTab === 'plan' && (
@@ -729,7 +807,7 @@ function App() {
         <footer className="page-footer"><span>kakeibo<span className="footer-dot">.</span> Финансовая осознанность в вашем ритме</span><span>Сделано с заботой о вас <Leaf size={13} /></span></footer>
       </main>
 
-      {transactionOpen && <TransactionDialog month={month} settings={settings} onClose={() => setTransactionOpen(false)} onSave={handleSaveTransaction} />}
+      {(transactionOpen || editingTransaction) && <TransactionDialog key={editingTransaction?.id ?? 'new'} month={month} settings={settings} initial={editingTransaction ?? undefined} onClose={() => { setTransactionOpen(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {planOpen && <PlanDialog month={month} initial={plan} incomeCategories={settings.incomeCategories} expenseCategories={settings.expenseCategories} onClose={() => setPlanOpen(false)} onSave={handleSavePlan} />}
       {backupOpen && <BackupDialog error={backupError} message={backupMessage} onClose={() => setBackupOpen(false)} onSubmit={handleBackup} />}
     </div>
@@ -745,25 +823,44 @@ function CategoryIcon({ icon, className = '' }: { icon: string; className?: stri
   return <Icon className={className} size={15} strokeWidth={1.8} aria-hidden="true" />;
 }
 
-function TransactionRows({ items, spheres, expenseCategoryIcons, incomeCategoryIcons, onDelete }: {
+function TransactionRows({ items, spheres, expenseCategoryIcons, incomeCategoryIcons, groupByDay = false, onEdit, onDelete }: {
   items: MoneyTransaction[];
   spheres: AppSettings['spheres'];
   expenseCategoryIcons?: Record<string, string>;
   incomeCategoryIcons?: Record<string, string>;
+  groupByDay?: boolean;
+  onEdit: (transaction: MoneyTransaction) => void;
   onDelete: (id: string) => void;
 }) {
   if (!items.length) return <EmptyState text="Пока нет записей за этот месяц. Добавьте первую — это займёт минуту." />;
-  return <div className="transaction-list">{items.map((item) => {
-    const income = item.kind === 'income';
-    return (
-      <div className="transaction-row" key={item.id}>
-        <span className={`transaction-symbol ${income ? 'income-symbol' : 'expense-symbol'}`}>{income ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span>
-        <span className="transaction-description"><strong>{item.note || item.category}</strong><small><span className="transaction-category"><CategoryIcon icon={(income ? incomeCategoryIcons : expenseCategoryIcons)?.[item.category] ?? 'tag'} />{item.category}</span>{!income && item.sphere ? ` · ${spheres.find((sphere) => sphere.id === item.sphere)?.name ?? item.sphere}` : ''} · {formatDate(item.date)}</small></span>
-        <span className={`transaction-value ${income ? 'positive' : ''}`}>{income ? '+' : '−'}{formatMoney(item.amount)} ₽</span>
-        <button className="icon-button delete-button" aria-label={`Удалить запись «${item.note || item.category}»`} onClick={() => onDelete(item.id)}><Trash2 size={15} /></button>
-      </div>
-    );
-  })}</div>;
+  const groups: [string, MoneyTransaction[]][] = groupByDay
+    ? [...items.reduce((result, item) => {
+      const dayItems = result.get(item.date) ?? [];
+      dayItems.push(item);
+      result.set(item.date, dayItems);
+      return result;
+    }, new Map<string, MoneyTransaction[]>()).entries()]
+    : [['', items]];
+
+  return <div className={`transaction-list ${groupByDay ? 'transaction-list-grouped' : ''}`}>{groups.map(([date, dayItems]) => (
+    <section className="transaction-day" key={date || 'all'}>
+      {groupByDay && <h2 className="transaction-day-heading">{new Intl.DateTimeFormat('ru-RU', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      }).format(new Date(`${date}T00:00:00`))}</h2>}
+      {dayItems.map((item) => {
+        const income = item.kind === 'income';
+        return (
+          <div className="transaction-row" key={item.id}>
+            <span className={`transaction-symbol ${income ? 'income-symbol' : 'expense-symbol'}`}>{income ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span>
+            <span className="transaction-description"><strong>{item.note || item.category}</strong><small><span className="transaction-category"><CategoryIcon icon={(income ? incomeCategoryIcons : expenseCategoryIcons)?.[item.category] ?? 'tag'} />{item.category}</span>{!income && item.sphere ? ` · ${spheres.find((sphere) => sphere.id === item.sphere)?.name ?? item.sphere}` : ''}{!groupByDay ? ` · ${formatDate(item.date)}` : ''}</small></span>
+            <span className={`transaction-value ${income ? 'positive' : ''}`}>{income ? '+' : '−'}{formatMoney(item.amount)} ₽</span>
+            <button className="icon-button edit-button" aria-label={`Редактировать запись «${item.note || item.category}»`} onClick={() => onEdit(item)}><Pencil size={14} /></button>
+            <button className="icon-button delete-button" aria-label={`Удалить запись «${item.note || item.category}»`} onClick={() => onDelete(item.id)}><Trash2 size={15} /></button>
+          </div>
+        );
+      })}
+    </section>
+  ))}</div>;
 }
 
 function PlanLine({ title, amount }: { title: string; amount: number }) {
@@ -1062,13 +1159,19 @@ function DialogFrame({ title, subtitle, onClose, children, wide = false }: { tit
   </div>;
 }
 
-function TransactionDialog({ month, settings, onClose, onSave }: { month: string; settings: AppSettings; onClose: () => void; onSave: (transaction: MoneyTransaction) => Promise<void> }) {
-  const [kind, setKind] = useState<TransactionKind>('expense');
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState(settings.expenseCategories[0] ?? '');
-  const [sphere, setSphere] = useState(settings.spheres[0]?.id ?? '');
-  const [note, setNote] = useState('');
-  const [date, setDate] = useState(month === monthKey(new Date()) ? localDateString(new Date()) : `${month}-01`);
+function TransactionDialog({ month, settings, initial, onClose, onSave }: {
+  month: string;
+  settings: AppSettings;
+  initial?: MoneyTransaction;
+  onClose: () => void;
+  onSave: (transaction: MoneyTransaction) => Promise<void>;
+}) {
+  const [kind, setKind] = useState<TransactionKind>(initial?.kind ?? 'expense');
+  const [amount, setAmount] = useState(initial ? normalizeMoneyInput(String(initial.amount / 100)) : '');
+  const [category, setCategory] = useState(initial?.category ?? settings.expenseCategories[0] ?? '');
+  const [sphere, setSphere] = useState(initial?.sphere ?? settings.spheres[0]?.id ?? '');
+  const [note, setNote] = useState(initial?.note ?? '');
+  const [date, setDate] = useState(initial?.date ?? (month === monthKey(new Date()) ? localDateString(new Date()) : `${month}-01`));
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const categories = kind === 'expense' ? settings.expenseCategories : settings.incomeCategories;
@@ -1083,27 +1186,56 @@ function TransactionDialog({ month, settings, onClose, onSave }: { month: string
     }
     setSaving(true);
     try {
-      await onSave({ id: crypto.randomUUID(), kind, amount: amountInKopecks, category, ...(kind === 'expense' ? { sphere } : {}), note: note.trim(), date, createdAt: new Date().toISOString() });
+      await onSave({
+        id: initial?.id ?? crypto.randomUUID(),
+        kind,
+        amount: amountInKopecks,
+        category,
+        ...(kind === 'expense' ? { sphere } : {}),
+        note: note.trim(),
+        date,
+        createdAt: initial?.createdAt ?? new Date().toISOString(),
+      });
     } catch (reason) {
       setFormError(reason instanceof Error ? reason.message : 'Не удалось сохранить запись.');
     } finally { setSaving(false); }
   }
 
-  return <DialogFrame title="Новая запись" subtitle={`Запись попадёт в бюджет «${formatMonth(month)}».`} onClose={onClose}>
+  const currentCategories = initial && !categories.includes(category) ? [category, ...categories] : categories;
+  const currentSpheres = initial?.sphere && !settings.spheres.some((item) => item.id === initial.sphere)
+    ? [{ id: initial.sphere, name: `Удалённая сфера (${initial.sphere.slice(0, 8)})` }, ...settings.spheres]
+    : settings.spheres;
+
+  return <DialogFrame title={initial ? 'Редактировать запись' : 'Новая запись'} subtitle={`Запись попадёт в бюджет «${formatMonth(month)}».`} onClose={onClose}>
     <form className="dialog-form" onSubmit={submit}>
       <div className="segmented-control"><button type="button" className={kind === 'expense' ? 'selected' : ''} onClick={() => { setKind('expense'); setCategory(settings.expenseCategories[0] ?? ''); }}>Расход</button><button type="button" className={kind === 'income' ? 'selected' : ''} onClick={() => { setKind('income'); setCategory(settings.incomeCategories[0] ?? ''); }}>Доход</button></div>
       <label className="field-label">Сумма, ₽<input autoFocus inputMode="decimal" placeholder="0,00" value={amount} onChange={(event) => handleMoneyInput(event, setAmount)} required /></label>
       <div className="form-row">
-        <label className="field-label">Категория<select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label className="field-label">Дата<input type="date" value={date} onChange={(event) => setDate(event.target.value)} required /></label>
+        <label className="field-label">Категория<select value={category} onChange={(event) => setCategory(event.target.value)}>{currentCategories.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <div className="field-label">Дата
+          <span className="plan-date-field">
+            <span className="plan-date-display" aria-hidden="true">
+              <span>{formatPlanDate(date)}</span>
+              <CalendarDays size={14} />
+            </span>
+            <input
+              aria-label="Дата"
+              lang="ru-RU"
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              required
+            />
+          </span>
+        </div>
       </div>
       {kind === 'expense' && <>
-        <label className="field-label">Сфера какебо<select value={sphere} onChange={(event) => setSphere(event.target.value)}>{settings.spheres.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label className="field-label">Сфера какебо<select value={sphere} onChange={(event) => setSphere(event.target.value)}>{currentSpheres.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <p className="field-hint">Сфера и категория не зависят друг от друга — выбирайте каждую отдельно.</p>
       </>}
       <label className="field-label">Заметка <span className="optional-label">необязательно</span><input maxLength={80} placeholder="Например, обед с друзьями" value={note} onChange={(event) => setNote(event.target.value)} /></label>
       {formError && <p className="form-error" role="alert">{formError}</p>}
-      <button className="primary-button full-button" disabled={saving}>{saving ? 'Сохраняем…' : 'Сохранить запись'} <ArrowRight size={16} /></button>
+      <button className="primary-button full-button" disabled={saving}>{saving ? 'Сохраняем…' : initial ? 'Сохранить изменения' : 'Сохранить запись'} <ArrowRight size={16} /></button>
     </form>
   </DialogFrame>;
 }
@@ -1428,7 +1560,7 @@ function PlanDialog({ month, initial, incomeCategories, expenseCategories, onClo
                 <input aria-label={`${title}: сумма ${index + 1}`} inputMode="decimal" placeholder="0,00" value={item.amount} onChange={(event) => handleMoneyInput(event, (value) => updateItem(kind, item.id, 'amount', value))} />
                 <label className="plan-date-field">
                   <span className="plan-date-display" aria-hidden="true">
-                    {item.date || 'дд.мм.гггг'}
+                    <span>{item.date || 'дд.мм.гггг'}</span>
                     <CalendarDays size={14} />
                   </span>
                   <input
