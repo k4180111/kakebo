@@ -29,7 +29,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; color: white; background: var(--green); border-radius: 12px 12px 12px 4px; }
 .brand-word { font: 800 22px Manrope, sans-serif; letter-spacing: -1.1px; }
 .brand-word > span, .footer-dot { color: #8caf7a; }
-.side-label, .breadcrumb, .summary-label, .hero-label, .eyebrow, .quote-caption, .drive-roadmap span { font-size: 10px; font-weight: 700; letter-spacing: 1.1px; }
+.side-label, .breadcrumb, .summary-label, .hero-label, .eyebrow, .quote-caption { font-size: 10px; font-weight: 700; letter-spacing: 1.1px; }
 .side-label { color: #a1a196; margin: 0 0 12px 11px; }
 .side-nav { display: grid; gap: 5px; }
 .nav-link { display: flex; position: relative; align-items: center; gap: 13px; width: 100%; min-height: 45px; padding: 0 12px; color: #77796f; font-size: 13px; font-weight: 500; text-align: left; border: 0; border-radius: 9px; background: transparent; transition: background .15s, color .15s; }
@@ -131,7 +131,7 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .lower-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 15px; margin-top: 16px; }
 .panel { padding: 18px 19px; }
 .panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; margin-bottom: 11px; }
-.panel-heading h3, .plan-note h3, .settings-card h3, .drive-roadmap h3 { margin: 0 0 4px; font: 700 13px Manrope, sans-serif; letter-spacing: -.15px; }
+.panel-heading h3, .plan-note h3, .settings-card h3, .drive-backup h3 { margin: 0 0 4px; font: 700 13px Manrope, sans-serif; letter-spacing: -.15px; }
 .panel-heading p { margin: 0; color: #999b92; font-size: 9px; }
 .subtle-button, .category-footer { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; color: #6f8b69; font-size: 9px; border: 0; background: transparent; white-space: nowrap; }
 .subtle-button:hover, .category-footer:hover { color: var(--green-dark); }
@@ -284,16 +284,20 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .catalog-add .outline-button { justify-content: center; }
 .catalog-editor > .form-error { margin-top: 1px; }
 .settings-card { display: flex; align-items: center; gap: 15px; padding: 19px; }
-.settings-icon, .roadmap-icon { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; color: #618365; border-radius: 11px; background: #edf3e9; }
+.settings-icon { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; color: #618365; border-radius: 11px; background: #edf3e9; }
 .settings-card > div:nth-child(2) { flex: 1; }
-.settings-card p, .drive-roadmap p { max-width: 620px; margin: 0; color: #898b82; font-size: 10px; line-height: 1.65; }
+.settings-card p { max-width: 620px; margin: 0; color: #898b82; font-size: 10px; line-height: 1.65; }
 .secure-tag { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; color: #66825d; font-size: 9px; border-radius: 20px; background: #eef4e9; white-space: nowrap; }
 .outline-button { display: inline-flex; align-items: center; gap: 7px; padding: 9px 11px; color: #557451; font-size: 10px; border: 1px solid #dce6d8; border-radius: 7px; background: #fffefa; white-space: nowrap; }
 .outline-button:hover { background: #f4f7f0; }
-.drive-roadmap { display: flex; align-items: start; gap: 13px; padding: 20px; background: #fbfaf6; }
-.roadmap-icon { width: 33px; height: 33px; color: #8a8b7f; background: #f1f0e9; }
-.drive-roadmap h3 { margin: 1px 0 6px; }
-.drive-roadmap span { display: inline-block; margin-top: 11px; color: #999b8e; font-size: 8px; letter-spacing: .7px; }
+.drive-backup { display: grid; gap: 13px; padding: 19px; }
+.drive-backup-heading { display: flex; align-items: start; gap: 15px; }
+.drive-backup-heading > div { flex: 1; }
+.drive-backup-heading h3 { margin: 2px 0 5px; }
+.drive-backup-heading p, .drive-backup-note { margin: 0; color: #898b82; font-size: 10px; line-height: 1.65; }
+.drive-backup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.drive-backup-actions .outline-button { margin: 0; text-decoration: none; }
+.drive-backup-note { color: #a0a197; font-size: 9px; }
 .loading { padding: 100px 30px; color: #898b82; font-size: 12px; text-align: center; }
 .error-banner { padding: 11px 16px; margin: 15px 48px 0; color: #8d4139; font-size: 11px; border: 1px solid #f0d4ce; border-radius: 8px; background: #fff2ef; }
 
@@ -428,6 +432,8 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
   .reflection-card { min-height: 120px; padding: 16px; }
   .reflection-date { align-self: start; }
   .settings-card { flex-wrap: wrap; padding: 15px; }
+  .drive-backup-actions { display: grid; grid-template-columns: 1fr; }
+  .drive-backup-actions .outline-button { justify-content: center; }
   .catalog-panel { padding: 15px; }
   .secure-tag, .outline-button { margin-left: 55px; }
   .error-banner { margin-right: 14px; margin-left: 14px; }

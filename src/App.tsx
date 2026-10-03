@@ -16,11 +16,13 @@ import {
   Church,
   ChevronDown,
   Clapperboard,
-  CircleHelp,
   Coins,
   Coffee,
   CreditCard,
   Download,
+  Upload,
+  Cloud,
+  ExternalLink,
   Dumbbell,
   Ellipsis,
   Flower2,
@@ -265,6 +267,7 @@ function App() {
   const monthSwitcherRef = useRef<HTMLDivElement>(null);
   const [planOpen, setPlanOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [backupMode, setBackupMode] = useState<'export' | 'import'>('export');
   const [backupError, setBackupError] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
 
@@ -778,7 +781,7 @@ function App() {
                 <div className="section-title-row"><div><p className="eyebrow">НАМЕРЕНИЕ НА МЕСЯЦ</p><h1>План бюджета</h1><p className="welcome-copy">Сначала отложите на важное — остальное станет яснее.</p></div></div>
                 <div className="plan-layout">
                   <article className="panel plan-main"><div className="panel-heading"><div><h3>{formatMonth(month)}</h3><p>Ваш план распределения дохода</p></div></div>
-                    <BudgetItemsSummary title="Плановые доходы" items={plan.incomeItems} categoryIcons={settings.incomeCategoryIcons} />
+                    <BudgetItemsSummary title="Плановые доходы" items={plan.incomeItems} categoryIcons={settings.incomeCategoryIcons} categorySecondary />
                     <BudgetItemsSummary title="Обязательные расходы" items={plan.expenseItems} categoryIcons={settings.expenseCategoryIcons} categorySecondary />
                     <section className="budget-summary-section savings-goal-section">
                       <div className="budget-summary-heading">
@@ -871,8 +874,18 @@ function App() {
                     />
                   </article>
                   <article className="panel settings-card"><div className="settings-icon"><LockKeyhole size={20} /></div><div><h3>Локальное хранение</h3><p>Данные сохраняются в IndexedDB этого браузера и не отправляются на сервер.</p></div><span className="secure-tag"><Check size={14} /> На устройстве</span></article>
-                  <article className="panel settings-card"><div className="settings-icon"><ShieldCheck size={20} /></div><div><h3>Зашифрованная копия</h3><p>Резервная копия шифруется в браузере алгоритмом AES-256-GCM. Пароль не передаётся и не сохраняется.</p></div><button className="outline-button" onClick={() => { setBackupOpen(true); setBackupError(''); setBackupMessage(''); }}>Управлять копией <ArrowRight size={15} /></button></article>
-                  <article className="panel drive-roadmap"><div className="roadmap-icon"><CircleHelp size={18} /></div><div><h3>Google Drive</h3><p>Синхронизацию подключим следующим этапом: файл будет шифроваться до отправки в Google Drive. Для этого понадобятся OAuth client ID и настройка приложения в Google Cloud.</p><span>СЕЙЧАС: РУЧНОЕ РЕЗЕРВНОЕ КОПИРОВАНИЕ</span></div></article>
+                  <article className="panel drive-backup">
+                    <div className="drive-backup-heading">
+                      <span className="settings-icon"><Cloud size={20} /></span>
+                      <div><h3>Зашифрованная копия в Google Drive</h3><p>Скачайте файл, затем загрузите его в Google Drive. Для восстановления скачайте файл из Drive и импортируйте сюда.</p></div>
+                    </div>
+                    <div className="drive-backup-actions">
+                      <button className="outline-button" onClick={() => { setBackupMode('export'); setBackupOpen(true); setBackupError(''); setBackupMessage(''); }}><Download size={15} /> Скачать зашифрованный файл</button>
+                      <button className="outline-button" onClick={() => { setBackupMode('import'); setBackupOpen(true); setBackupError(''); setBackupMessage(''); }}><Upload size={15} /> Импортировать файл</button>
+                      <a className="outline-button" href="https://drive.google.com/drive/my-drive" target="_blank" rel="noreferrer">Открыть Google Drive <ExternalLink size={14} /></a>
+                    </div>
+                    <p className="drive-backup-note">Файл шифруется в браузере (AES-256-GCM). Пароль не сохраняется — используйте один и тот же при создании и восстановлении.</p>
+                  </article>
                 </div>
               </section>
             )}
@@ -883,7 +896,7 @@ function App() {
 
       {(transactionOpen || editingTransaction) && <TransactionDialog key={editingTransaction?.id ?? 'new'} month={month} settings={settings} initial={editingTransaction ?? undefined} onClose={() => { setTransactionOpen(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {planOpen && <PlanDialog month={month} initial={plan} incomeCategories={settings.incomeCategories} expenseCategories={settings.expenseCategories} onClose={() => setPlanOpen(false)} onSave={handleSavePlan} />}
-      {backupOpen && <BackupDialog error={backupError} message={backupMessage} onClose={() => setBackupOpen(false)} onSubmit={handleBackup} />}
+      {backupOpen && <BackupDialog initialMode={backupMode} error={backupError} message={backupMessage} onClose={() => setBackupOpen(false)} onSubmit={handleBackup} />}
     </div>
   );
 }
@@ -1672,8 +1685,8 @@ function PlanDialog({ month, initial, incomeCategories, expenseCategories, onClo
   );
 }
 
-function BackupDialog({ error, message, onClose, onSubmit }: { error: string; message: string; onClose: () => void; onSubmit: (form: FormData) => Promise<void> }) {
-  const [mode, setMode] = useState<'export' | 'import'>('export');
+function BackupDialog({ initialMode, error, message, onClose, onSubmit }: { initialMode: 'export' | 'import'; error: string; message: string; onClose: () => void; onSubmit: (form: FormData) => Promise<void> }) {
+  const [mode, setMode] = useState<'export' | 'import'>(initialMode);
   const [busy, setBusy] = useState(false);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
