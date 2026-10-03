@@ -1,24 +1,53 @@
 export type TransactionKind = 'expense' | 'income';
+export const CATEGORY_ICON_IDS = [
+  'basket', 'home', 'bus', 'heart', 'book', 'sparkles', 'bag', 'wallet',
+  'briefcase', 'gift', 'tag', 'apple', 'car', 'train', 'plane', 'bike',
+  'fuel', 'coffee', 'utensils', 'pizza', 'shirt', 'paw', 'baby', 'pill',
+  'stethoscope', 'dumbbell', 'music', 'ticket', 'gamepad', 'film', 'wifi',
+  'phone', 'laptop', 'lightbulb', 'wrench', 'hammer', 'scissors', 'flower',
+  'tree', 'church', 'graduation', 'landmark', 'receipt', 'banknote',
+  'credit-card', 'piggy-bank', 'sprout', 'ellipsis',
+] as const;
+
 export interface KakeiboSphere {
   id: string;
   name: string;
+  color?: string;
 }
 
 export interface AppSettings {
   expenseCategories: string[];
   incomeCategories: string[];
   spheres: KakeiboSphere[];
+  expenseCategoryIcons?: Record<string, string>;
+  incomeCategoryIcons?: Record<string, string>;
 }
 
 export const defaultAppSettings: AppSettings = {
   expenseCategories: ['Продукты', 'Дом', 'Транспорт', 'Здоровье', 'Образование', 'Отдых', 'Покупки', 'Другое'],
   incomeCategories: ['Зарплата', 'Подработка', 'Подарок', 'Другое'],
   spheres: [
-    { id: 'needs', name: 'Нужды' },
-    { id: 'wants', name: 'Желания' },
-    { id: 'culture', name: 'Культура' },
-    { id: 'unexpected', name: 'Непредвиденное' },
+    { id: 'needs', name: 'Нужды', color: '#88a77f' },
+    { id: 'wants', name: 'Желания', color: '#d7a27d' },
+    { id: 'culture', name: 'Культура', color: '#a39bbd' },
+    { id: 'unexpected', name: 'Непредвиденное', color: '#d1bd70' },
   ],
+  expenseCategoryIcons: {
+    Продукты: 'basket',
+    Дом: 'home',
+    Транспорт: 'bus',
+    Здоровье: 'heart',
+    Образование: 'book',
+    Отдых: 'sparkles',
+    Покупки: 'bag',
+    Другое: 'tag',
+  },
+  incomeCategoryIcons: {
+    Зарплата: 'wallet',
+    Подработка: 'briefcase',
+    Подарок: 'gift',
+    Другое: 'tag',
+  },
 };
 
 export interface MoneyTransaction {
@@ -34,15 +63,41 @@ export interface MoneyTransaction {
 
 export interface MonthlyPlan {
   month: string;
-  income: number;
-  fixedCosts: number;
+  incomeItems: PlannedBudgetItem[];
+  expenseItems: PlannedBudgetItem[];
   savingsGoal: number;
+  sphereAllocations: SphereAllocation[];
+}
+
+export interface SphereAllocation {
+  sphereId: string;
+  amount: number;
+  percentage?: number;
+}
+
+export interface PlannedBudgetItem {
+  id: string;
+  name: string;
+  amount: number;
+  date: string;
+  category?: string;
+  note?: string;
+}
+
+interface LegacyMonthlyPlan {
+  month: string;
+  income?: number;
+  fixedCosts?: number;
+  savingsGoal: number;
+  incomeItems?: PlannedBudgetItem[];
+  expenseItems?: PlannedBudgetItem[];
+  sphereAllocations?: SphereAllocation[];
 }
 
 export interface KakeiboBackup {
   version: 1;
   transactions: MoneyTransaction[];
-  plans: MonthlyPlan[];
+  plans: LegacyMonthlyPlan[];
   settings?: AppSettings;
 }
 
@@ -51,6 +106,10 @@ function isCalendarDate(value: string): boolean {
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(year, month - 1, day);
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function isMonth(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
 const DATABASE_NAME = 'kakeibo';
@@ -149,10 +208,28 @@ export async function renameTransactionCategory(
 export async function getPlan(month: string): Promise<MonthlyPlan | undefined> {
   const database = await openDatabase();
   try {
-    return await requestResult(database.transaction('plans').objectStore('plans').get(month));
+    const record = await requestResult(database.transaction('plans').objectStore('plans').get(month)) as LegacyMonthlyPlan | undefined;
+    return record ? normalizePlan(record) : undefined;
   } finally {
     database.close();
   }
+}
+
+function normalizePlan(plan: LegacyMonthlyPlan): MonthlyPlan {
+  const legacyDate = `${plan.month}-01`;
+  const incomeItems = plan.incomeItems ?? (plan.income
+    ? [{ id: `legacy-income-${plan.month}`, name: 'Плановый доход', amount: plan.income, date: legacyDate }]
+    : []);
+  const expenseItems = plan.expenseItems ?? (plan.fixedCosts
+    ? [{ id: `legacy-expense-${plan.month}`, name: 'Обязательные расходы', amount: plan.fixedCosts, date: legacyDate }]
+    : []);
+  return {
+    month: plan.month,
+    incomeItems,
+    expenseItems,
+    savingsGoal: plan.savingsGoal,
+    sphereAllocations: plan.sphereAllocations ?? [],
+  };
 }
 
 export async function savePlan(plan: MonthlyPlan): Promise<void> {
@@ -168,7 +245,18 @@ export async function getSettings(): Promise<AppSettings> {
   const database = await openDatabase();
   try {
     const settings = await requestResult(database.transaction('settings').objectStore('settings').get('app')) as AppSettings | undefined;
-    return settings ?? structuredClone(defaultAppSettings);
+    return settings
+      ? {
+        ...structuredClone(defaultAppSettings),
+        ...settings,
+        expenseCategoryIcons: { ...defaultAppSettings.expenseCategoryIcons, ...settings.expenseCategoryIcons },
+        incomeCategoryIcons: { ...defaultAppSettings.incomeCategoryIcons, ...settings.incomeCategoryIcons },
+        spheres: settings.spheres.map((sphere, index) => ({
+          ...sphere,
+          color: sphere.color ?? defaultAppSettings.spheres[index % defaultAppSettings.spheres.length].color,
+        })),
+      }
+      : structuredClone(defaultAppSettings);
   } finally {
     database.close();
   }
@@ -196,7 +284,7 @@ export async function makeBackup(): Promise<KakeiboBackup> {
     return {
       version: 1,
       transactions: records.map(normalizeTransaction),
-      plans,
+      plans: plans.map((plan) => normalizePlan(plan as LegacyMonthlyPlan)),
       settings: settingsRecord ?? structuredClone(defaultAppSettings),
     };
   } finally {
@@ -216,7 +304,7 @@ export async function restoreBackup(backup: KakeiboBackup): Promise<void> {
     transactionStore.clear();
     planStore.clear();
     backup.transactions.forEach((item) => transactionStore.put(normalizeTransaction(item)));
-    backup.plans.forEach((item) => planStore.put(item));
+    backup.plans.forEach((item) => planStore.put(normalizePlan(item)));
     if (backup.settings) transaction.objectStore('settings').put({ ...backup.settings, id: 'app' });
     await new Promise<void>((resolve, reject) => {
       transaction.oncomplete = () => resolve();
@@ -249,17 +337,61 @@ export function isKakeiboBackup(value: unknown): value is KakeiboBackup {
       && isCalendarDate(item.date)
       && typeof item.createdAt === 'string'
     ))
-    && candidate.plans.every((item) => (
-      !!item
-      && /^\d{4}-\d{2}$/.test(item.month)
-      && Number.isSafeInteger(item.income)
-      && Number.isSafeInteger(item.fixedCosts)
-      && Number.isSafeInteger(item.savingsGoal)
-      && item.income >= 0
-      && item.fixedCosts >= 0
-      && item.savingsGoal >= 0
-    ))
+    && candidate.plans.every(isValidPlan)
     && (candidate.settings === undefined || isAppSettings(candidate.settings));
+}
+
+function isValidPlannedItem(value: unknown, planMonth: string): value is PlannedBudgetItem {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<PlannedBudgetItem>;
+  return typeof item.id === 'string'
+    && item.id.length > 0
+    && typeof item.name === 'string'
+    && item.name.trim().length > 0
+    && item.name.length <= 80
+    && Number.isSafeInteger(item.amount)
+    && item.amount! > 0
+    && typeof item.date === 'string'
+    && isCalendarDate(item.date)
+    && item.date.startsWith(`${planMonth}-`)
+    && (item.category === undefined || (typeof item.category === 'string' && item.category.trim().length > 0))
+    && (item.note === undefined || (typeof item.note === 'string' && item.note.length <= 80));
+}
+
+function isValidPlan(value: unknown): value is LegacyMonthlyPlan {
+  if (!value || typeof value !== 'object') return false;
+  const plan = value as Partial<LegacyMonthlyPlan>;
+  if (typeof plan.month !== 'string' || !isMonth(plan.month)
+    || !Number.isSafeInteger(plan.savingsGoal) || plan.savingsGoal! < 0) return false;
+
+  if (plan.incomeItems !== undefined || plan.expenseItems !== undefined) {
+    if (!Array.isArray(plan.incomeItems)
+      || !plan.incomeItems.every((item) => isValidPlannedItem(item, plan.month!))
+      || !Array.isArray(plan.expenseItems)
+      || !plan.expenseItems.every((item) => isValidPlannedItem(item, plan.month!))) return false;
+    const items = [...plan.incomeItems, ...plan.expenseItems];
+    const ids = items.map((item) => item.id);
+    const incomeTotal = plan.incomeItems.reduce((sum, item) => sum + item.amount, 0);
+    const expenseTotal = plan.expenseItems.reduce((sum, item) => sum + item.amount, 0);
+    const allocations = plan.sphereAllocations ?? [];
+    if (!Array.isArray(allocations)
+      || allocations.some((item) => !item || typeof item.sphereId !== 'string' || !item.sphereId
+        || !Number.isSafeInteger(item.amount) || item.amount < 0
+        || (item.percentage === undefined ? item.amount === 0
+          : typeof item.percentage !== 'number' || !Number.isFinite(item.percentage) || item.percentage < 0 || item.percentage > 100))
+      || new Set(allocations.map((item) => item.sphereId)).size !== allocations.length) return false;
+    const allocationTotal = allocations.reduce((sum, item) => sum + item.amount, 0);
+    return new Set(ids).size === ids.length
+      && Number.isSafeInteger(incomeTotal)
+      && Number.isSafeInteger(expenseTotal)
+      && Number.isSafeInteger(expenseTotal + plan.savingsGoal!)
+      && Number.isSafeInteger(allocationTotal);
+  }
+
+  return Number.isSafeInteger(plan.income)
+    && plan.income! >= 0
+    && Number.isSafeInteger(plan.fixedCosts)
+    && plan.fixedCosts! >= 0;
 }
 
 export function isAppSettings(value: unknown): value is AppSettings {
@@ -282,7 +414,16 @@ export function isAppSettings(value: unknown): value is AppSettings {
       && typeof sphere.name === 'string'
       && sphere.name.trim().length > 0
       && sphere.name.length <= 40
+      && (sphere.color === undefined || (typeof sphere.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(sphere.color)))
     ))
     && new Set(settings.spheres.map((sphere) => sphere.id)).size === settings.spheres.length
-    && new Set(settings.spheres.map((sphere) => sphere.name.trim().toLocaleLowerCase())).size === settings.spheres.length;
+    && new Set(settings.spheres.map((sphere) => sphere.name.trim().toLocaleLowerCase())).size === settings.spheres.length
+    && (settings.expenseCategoryIcons === undefined || validIconMap(settings.expenseCategoryIcons))
+    && (settings.incomeCategoryIcons === undefined || validIconMap(settings.incomeCategoryIcons));
+}
+
+function validIconMap(value: unknown): value is Record<string, string> {
+  const icons = new Set<string>(CATEGORY_ICON_IDS);
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.entries(value).every(([name, icon]) => name.length > 0 && typeof icon === 'string' && icons.has(icon));
 }
