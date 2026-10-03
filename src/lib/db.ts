@@ -75,6 +75,11 @@ export interface SphereAllocation {
   percentage?: number;
 }
 
+export interface MonthlyReflection {
+  month: string;
+  answers: string[];
+}
+
 export interface PlannedBudgetItem {
   id: string;
   name: string;
@@ -99,6 +104,7 @@ export interface KakeiboBackup {
   transactions: MoneyTransaction[];
   plans: LegacyMonthlyPlan[];
   settings?: AppSettings;
+  reflections?: MonthlyReflection[];
 }
 
 function isCalendarDate(value: string): boolean {
@@ -113,7 +119,7 @@ function isMonth(value: string): boolean {
 }
 
 const DATABASE_NAME = 'kakeibo';
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -123,6 +129,7 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains('transactions')) database.createObjectStore('transactions', { keyPath: 'id' });
       if (!database.objectStoreNames.contains('plans')) database.createObjectStore('plans', { keyPath: 'month' });
       if (!database.objectStoreNames.contains('settings')) database.createObjectStore('settings', { keyPath: 'id' });
+      if (!database.objectStoreNames.contains('reflections')) database.createObjectStore('reflections', { keyPath: 'month' });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('Не удалось открыть локальную базу данных.'));
@@ -272,20 +279,44 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   }
 }
 
+export async function getReflection(month: string): Promise<MonthlyReflection> {
+  const database = await openDatabase();
+  try {
+    const reflection = await requestResult(database.transaction('reflections')
+      .objectStore('reflections').get(month)) as MonthlyReflection | undefined;
+    return reflection ?? { month, answers: ['', '', '', ''] };
+  } finally {
+    database.close();
+  }
+}
+
+export async function saveReflection(reflection: MonthlyReflection): Promise<void> {
+  if (!isValidReflection(reflection)) throw new Error('Не удалось сохранить ответы: проверьте данные рефлексии.');
+  const database = await openDatabase();
+  try {
+    await requestResult(database.transaction('reflections', 'readwrite')
+      .objectStore('reflections').put(reflection));
+  } finally {
+    database.close();
+  }
+}
+
 export async function makeBackup(): Promise<KakeiboBackup> {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction(['transactions', 'plans', 'settings']);
-    const [records, plans, settingsRecord] = await Promise.all([
+    const transaction = database.transaction(['transactions', 'plans', 'settings', 'reflections']);
+    const [records, plans, settingsRecord, reflections] = await Promise.all([
       requestResult(transaction.objectStore('transactions').getAll()),
       requestResult(transaction.objectStore('plans').getAll()),
       requestResult(transaction.objectStore('settings').get('app')),
+      requestResult(transaction.objectStore('reflections').getAll()),
     ]);
     return {
       version: 1,
       transactions: records.map(normalizeTransaction),
       plans: plans.map((plan) => normalizePlan(plan as LegacyMonthlyPlan)),
       settings: settingsRecord ?? structuredClone(defaultAppSettings),
+      reflections,
     };
   } finally {
     database.close();
@@ -296,15 +327,18 @@ export async function restoreBackup(backup: KakeiboBackup): Promise<void> {
   const database = await openDatabase();
   try {
     const stores = backup.settings
-      ? ['transactions', 'plans', 'settings']
-      : ['transactions', 'plans'];
+      ? ['transactions', 'plans', 'settings', 'reflections']
+      : ['transactions', 'plans', 'reflections'];
     const transaction = database.transaction(stores, 'readwrite');
     const transactionStore = transaction.objectStore('transactions');
     const planStore = transaction.objectStore('plans');
+    const reflectionStore = transaction.objectStore('reflections');
     transactionStore.clear();
     planStore.clear();
+    reflectionStore.clear();
     backup.transactions.forEach((item) => transactionStore.put(normalizeTransaction(item)));
     backup.plans.forEach((item) => planStore.put(normalizePlan(item)));
+    backup.reflections?.forEach((reflection) => reflectionStore.put(reflection));
     if (backup.settings) transaction.objectStore('settings').put({ ...backup.settings, id: 'app' });
     await new Promise<void>((resolve, reject) => {
       transaction.oncomplete = () => resolve();
@@ -338,7 +372,19 @@ export function isKakeiboBackup(value: unknown): value is KakeiboBackup {
       && typeof item.createdAt === 'string'
     ))
     && candidate.plans.every(isValidPlan)
+    && (candidate.reflections === undefined
+      || (Array.isArray(candidate.reflections) && candidate.reflections.every(isValidReflection)))
     && (candidate.settings === undefined || isAppSettings(candidate.settings));
+}
+
+function isValidReflection(value: unknown): value is MonthlyReflection {
+  if (!value || typeof value !== 'object') return false;
+  const reflection = value as Partial<MonthlyReflection>;
+  return typeof reflection.month === 'string'
+    && isMonth(reflection.month)
+    && Array.isArray(reflection.answers)
+    && reflection.answers.length === 4
+    && reflection.answers.every((answer) => typeof answer === 'string' && answer.length <= 5000);
 }
 
 function isValidPlannedItem(value: unknown, planMonth: string): value is PlannedBudgetItem {

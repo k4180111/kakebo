@@ -7,6 +7,7 @@ import {
   Apple,
   Baby,
   Banknote,
+  BarChart3,
   BookOpen,
   Bike,
   Bus,
@@ -76,11 +77,13 @@ import {
   defaultAppSettings,
   CATEGORY_ICON_IDS,
   getPlan,
+  getReflection,
   getSettings,
   getTransactions,
   makeBackup,
   removeTransaction,
   restoreBackup,
+  saveReflection,
   savePlan,
   saveSettings,
   saveTransaction,
@@ -90,11 +93,13 @@ import {
   type PlannedBudgetItem,
   type SphereAllocation,
   type MonthlyPlan,
+  type MonthlyReflection,
   type TransactionKind,
 } from './lib/db';
 import { decryptBackup, encryptBackup } from './lib/crypto';
 
-type Tab = 'overview' | 'history' | 'plan' | 'reflection' | 'settings';
+type Tab = 'overview' | 'history' | 'charts' | 'plan' | 'reflection' | 'settings';
+type ChartRange = 'month' | 'year';
 
 const categoryIconOptions: { id: typeof CATEGORY_ICON_IDS[number]; label: string; icon: LucideIcon }[] = [
   { id: 'basket', label: 'Корзина', icon: ShoppingBasket },
@@ -153,6 +158,7 @@ const defaultSphereColors = ['#88a77f', '#d7a27d', '#a39bbd', '#d1bd70'];
 const navItems: { id: Tab; title: string; icon: typeof Wallet }[] = [
   { id: 'overview', title: 'Обзор', icon: Wallet },
   { id: 'history', title: 'Операции', icon: Coins },
+  { id: 'charts', title: 'Графики', icon: BarChart3 },
   { id: 'plan', title: 'Бюджет', icon: BookOpen },
   { id: 'reflection', title: 'Рефлексия', icon: Sparkles },
 ];
@@ -247,6 +253,7 @@ function handleMoneyInput(event: React.ChangeEvent<HTMLInputElement>, onChange: 
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [chartRange, setChartRange] = useState<ChartRange>('month');
   const [month, setMonth] = useState(monthKey(new Date()));
   const [transactions, setTransactions] = useState<MoneyTransaction[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
@@ -270,6 +277,7 @@ function App() {
   const [backupMode, setBackupMode] = useState<'export' | 'import'>('export');
   const [backupError, setBackupError] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
+  const [reflection, setReflection] = useState<MonthlyReflection>({ month: '', answers: ['', '', '', ''] });
 
   const monthTransactions = useMemo(
     () => transactions.filter((item) => item.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date)
@@ -290,11 +298,12 @@ function App() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([getTransactions(), getPlan(month)])
-      .then(([allTransactions, savedPlan]) => {
+    Promise.all([getTransactions(), getPlan(month), getReflection(month)])
+      .then(([allTransactions, savedPlan, savedReflection]) => {
         if (!active) return;
         setTransactions(allTransactions);
         setPlan(savedPlan ?? { month, incomeItems: [], expenseItems: [], savingsGoal: 0, sphereAllocations: [] });
+        setReflection(savedReflection);
         setError('');
       })
       .catch((reason: unknown) => {
@@ -435,6 +444,15 @@ function App() {
     setPlan(next);
   }
 
+  async function handleSaveReflectionAnswer(index: number, answer: string) {
+    const current = reflection.month === month ? reflection : { month, answers: ['', '', '', ''] };
+    const answers = [...current.answers];
+    answers[index] = answer;
+    const next = { month, answers };
+    await saveReflection(next);
+    setReflection(next);
+  }
+
   function shiftMonth(offset: number) {
     const [year, monthNumber] = month.split('-').map(Number);
     const next = new Date(year, monthNumber - 1 + offset, 1);
@@ -473,6 +491,7 @@ function App() {
         setTransactions(allTransactions);
         setPlan(savedPlan ?? { month, incomeItems: [], expenseItems: [], savingsGoal: 0, sphereAllocations: [] });
         setSettings(savedSettings);
+        setReflection(await getReflection(month));
         setBackupMessage('Данные восстановлены из резервной копии.');
       }
     } catch (reason) {
@@ -491,6 +510,53 @@ function App() {
     result[sphere] = (result[sphere] ?? 0) + item.amount;
     return result;
   }, {});
+  const daysInMonth = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
+  const dailyExpenseTotals = Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => ({
+    day,
+    amount: expenses.reduce((sum, item) => (
+      Number(item.date.slice(8, 10)) === day ? sum + item.amount : sum
+    ), 0),
+  }));
+  const chartSphereTotals = [
+    ...settings.spheres.map((sphere) => ({
+      name: sphere.name,
+      amount: sphereTotals[sphere.id] ?? 0,
+      color: sphere.color ?? defaultSphereColors[0],
+    })),
+    ...(sphereTotals.unassigned ? [{ name: 'Сфера не указана', amount: sphereTotals.unassigned, color: '#b8b9ae' }] : []),
+  ].filter((item) => item.amount > 0).sort((a, b) => b.amount - a.amount);
+  const selectedYear = month.slice(0, 4);
+  const yearTransactions = transactions.filter((item) => item.date.startsWith(`${selectedYear}-`));
+  const yearExpenses = yearTransactions.filter((item) => item.kind === 'expense');
+  const yearIncome = yearTransactions.filter((item) => item.kind === 'income');
+  const yearTotalSpent = yearExpenses.reduce((sum, item) => sum + item.amount, 0);
+  const yearTotalIncome = yearIncome.reduce((sum, item) => sum + item.amount, 0);
+  const yearCategoryTotals = yearExpenses.reduce<Record<string, number>>((result, item) => {
+    result[item.category] = (result[item.category] ?? 0) + item.amount;
+    return result;
+  }, {});
+  const yearSphereTotals = yearExpenses.reduce<Record<string, number>>((result, item) => {
+    const sphere = item.sphere ?? 'unassigned';
+    result[sphere] = (result[sphere] ?? 0) + item.amount;
+    return result;
+  }, {});
+  const yearChartSphereTotals = [
+    ...settings.spheres.map((sphere) => ({
+      name: sphere.name,
+      amount: yearSphereTotals[sphere.id] ?? 0,
+      color: sphere.color ?? defaultSphereColors[0],
+    })),
+    ...(yearSphereTotals.unassigned ? [{ name: 'Сфера не указана', amount: yearSphereTotals.unassigned, color: '#b8b9ae' }] : []),
+  ].filter((item) => item.amount > 0).sort((a, b) => b.amount - a.amount);
+  const monthlyTotals = Array.from({ length: 12 }, (_, index) => {
+    const key = `${selectedYear}-${String(index + 1).padStart(2, '0')}`;
+    return yearTransactions.reduce((totals, item) => {
+      if (!item.date.startsWith(key)) return totals;
+      if (item.kind === 'income') totals.income += item.amount;
+      else totals.expenses += item.amount;
+      return totals;
+    }, { month: index + 1, income: 0, expenses: 0 });
+  });
   const sphereRemainders = settings.spheres.map((sphere) => {
     const allocation = plan.sphereAllocations.find((item) => item.sphereId === sphere.id);
     const allocated = allocation?.percentage === undefined
@@ -776,6 +842,61 @@ function App() {
                 <div className="panel history-panel"><TransactionRows items={monthTransactions} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} groupByDay onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} /></div>
               </section>
             )}
+            {activeTab === 'charts' && (
+              <section className="content-section">
+                <div className="section-title-row">
+                  <div><p className="eyebrow">{chartRange === 'month' ? 'АНАЛИЗ МЕСЯЦА' : 'АНАЛИЗ ГОДА'}</p><h1>{chartRange === 'month' ? 'Графики' : `Итоги ${selectedYear} года`}</h1><p className="welcome-copy">{chartRange === 'month' ? `Доходы и расходы за ${formatMonth(month)}` : 'Годовая динамика доходов и расходов.'}</p></div>
+                  <div className="segmented-control chart-range-toggle" role="group" aria-label="Период анализа">
+                    <button type="button" className={chartRange === 'month' ? 'selected' : ''} aria-pressed={chartRange === 'month'} onClick={() => setChartRange('month')}>Месяц</button>
+                    <button type="button" className={chartRange === 'year' ? 'selected' : ''} aria-pressed={chartRange === 'year'} onClick={() => setChartRange('year')}>Год</button>
+                  </div>
+                </div>
+                {chartRange === 'month' ? <div className="charts-grid">
+                  <article className="panel chart-panel chart-panel-wide">
+                    <div className="panel-heading"><div><h3>Расходы по дням</h3><p>Фактические расходы за выбранный месяц</p></div><strong className="chart-total">{formatMoney(totalSpent)} ₽</strong></div>
+                    <DailyExpenseChart month={month} values={dailyExpenseTotals} />
+                  </article>
+                  <article className="panel chart-panel">
+                    <div className="panel-heading"><div><h3>По категориям</h3><p>Структура расходов</p></div></div>
+                    <BreakdownChart items={Object.entries(categoryTotals)
+                      .map(([name, amount]) => ({ name, amount }))
+                      .sort((a, b) => b.amount - a.amount)} total={totalSpent} />
+                  </article>
+                  <article className="panel chart-panel">
+                    <div className="panel-heading"><div><h3>По сферам какебо</h3><p>Распределение расходов по сферам</p></div></div>
+                    <BreakdownChart items={chartSphereTotals} total={totalSpent} />
+                  </article>
+                  <article className="panel chart-panel chart-panel-wide">
+                    <div className="panel-heading"><div><h3>Доходы и расходы</h3><p>Сравнение фактических сумм за месяц</p></div></div>
+                    <IncomeExpenseChart income={totalIncome} expenses={totalSpent} />
+                  </article>
+                </div> : (
+                  <>
+                    <section className="year-summary-grid">
+                      <article className="year-summary-card"><span>Доходы за год</span><strong>{formatMoney(yearTotalIncome)} ₽</strong></article>
+                      <article className="year-summary-card"><span>Расходы за год</span><strong>{formatMoney(yearTotalSpent)} ₽</strong></article>
+                      <article className="year-summary-card"><span>Разница</span><strong className={yearTotalIncome - yearTotalSpent < 0 ? 'year-negative' : ''}>{formatMoney(yearTotalIncome - yearTotalSpent)} ₽</strong></article>
+                    </section>
+                    <div className="charts-grid year-charts-grid">
+                      <article className="panel chart-panel chart-panel-wide">
+                        <div className="panel-heading"><div><h3>По месяцам</h3><p>Сравнение доходов и расходов за {selectedYear} год</p></div></div>
+                        <AnnualTrendChart values={monthlyTotals} />
+                      </article>
+                      <article className="panel chart-panel">
+                        <div className="panel-heading"><div><h3>Расходы по категориям</h3><p>За весь {selectedYear} год</p></div></div>
+                        <BreakdownChart items={Object.entries(yearCategoryTotals)
+                          .map(([name, amount]) => ({ name, amount }))
+                          .sort((a, b) => b.amount - a.amount)} total={yearTotalSpent} />
+                      </article>
+                      <article className="panel chart-panel">
+                        <div className="panel-heading"><div><h3>Расходы по сферам</h3><p>За весь {selectedYear} год</p></div></div>
+                        <BreakdownChart items={yearChartSphereTotals} total={yearTotalSpent} />
+                      </article>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
             {activeTab === 'plan' && (
               <section className="content-section">
                 <div className="section-title-row"><div><p className="eyebrow">НАМЕРЕНИЕ НА МЕСЯЦ</p><h1>План бюджета</h1><p className="welcome-copy">Сначала отложите на важное — остальное станет яснее.</p></div></div>
@@ -816,7 +937,16 @@ function App() {
                     ['02', 'Сколько я хочу накопить?', 'Ваша цель — ориентир, а не повод для беспокойства.'],
                     ['03', 'Сколько я трачу?', 'Какие категории оказались важнее, чем вы ожидали?'],
                     ['04', 'Как я могу улучшить ситуацию?', 'Выберите одно небольшое изменение на следующий месяц.'],
-                  ].map(([number, title, copy]) => <article className="reflection-card" key={number}><span>{number}</span><h3>{title}</h3><p>{copy}</p></article>)}
+                  ].map(([number, title, copy], index) => (
+                    <ReflectionCard
+                      key={`${month}-${number}`}
+                      number={number}
+                      title={title}
+                      prompt={copy}
+                      answer={reflection.month === month ? reflection.answers[index] ?? '' : ''}
+                      onSave={(answer) => handleSaveReflectionAnswer(index, answer)}
+                    />
+                  ))}
                 </div>
                 <div className="reflection-summary"><Sparkles size={18} /><p>В этом месяце вы записали <strong>{monthTransactions.length}</strong> операций на общую сумму расходов <strong>{formatMoney(totalSpent)} ₽</strong>. Уже хороший повод поблагодарить себя за внимание.</p></div>
               </section>
@@ -952,6 +1082,224 @@ function TransactionRows({ items, spheres, expenseCategoryIcons, incomeCategoryI
 
 function PlanLine({ title, amount }: { title: string; amount: number }) {
   return <div className="plan-line"><span>{title}</span><span>{formatMoney(amount)} ₽</span></div>;
+}
+
+function DailyExpenseChart({ month, values }: {
+  month: string;
+  values: { day: number; amount: number }[];
+}) {
+  const width = 720;
+  const height = 230;
+  const left = 56;
+  const right = 12;
+  const top = 14;
+  const bottom = 35;
+  const chartHeight = height - top - bottom;
+  const chartWidth = width - left - right;
+  const maxAmount = Math.max(0, ...values.map((item) => item.amount));
+  const scaleMax = maxAmount || 1;
+  const slotWidth = chartWidth / values.length;
+  const barWidth = Math.min(18, slotWidth * 0.62);
+  const labelInterval = values.length > 24 ? 5 : values.length > 12 ? 3 : 1;
+
+  if (maxAmount === 0) return <EmptyState text="В этом месяце расходов пока нет." />;
+
+  return (
+    <div className="daily-chart-scroll">
+      <svg className="daily-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Расходы по дням за ${formatMonth(month)}`}>
+        {[0, 1, 2, 3].map((tick) => {
+          const y = top + chartHeight * tick / 3;
+          const amount = scaleMax * (1 - tick / 3);
+          return (
+            <g key={tick}>
+              <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+              <text className="chart-axis-label" x="8" y={y + 3} textAnchor="start">{formatMoney(amount)}</text>
+            </g>
+          );
+        })}
+        {values.map(({ day, amount }) => {
+          const barHeight = amount ? Math.max(2, chartHeight * amount / scaleMax) : 0;
+          const x = left + slotWidth * (day - 1) + (slotWidth - barWidth) / 2;
+          const y = top + chartHeight - barHeight;
+          const showLabel = day === 1 || day % labelInterval === 0 || day === values.length;
+          return (
+            <g key={day}>
+              <title>{`${day} ${formatMonth(month).split(' ')[0]}: ${formatMoney(amount)} ₽`}</title>
+              {amount > 0 && <rect className="chart-bar" x={x} y={y} width={barWidth} height={barHeight} rx={Math.min(4, barWidth / 2)} />}
+              {showLabel && <text className="chart-axis-label chart-day-label" x={left + slotWidth * (day - .5)} y={height - 10} textAnchor="middle">{day}</text>}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function AnnualTrendChart({ values }: {
+  values: { month: number; income: number; expenses: number }[];
+}) {
+  const width = 720;
+  const height = 250;
+  const left = 56;
+  const right = 12;
+  const top = 18;
+  const bottom = 38;
+  const chartHeight = height - top - bottom;
+  const chartWidth = width - left - right;
+  const maxAmount = Math.max(0, ...values.flatMap((item) => [item.income, item.expenses]));
+  const scaleMax = maxAmount || 1;
+  const slotWidth = chartWidth / values.length;
+  const barWidth = Math.min(16, slotWidth * 0.29);
+  const monthLabels = Array.from({ length: 12 }, (_, index) => new Intl.DateTimeFormat('ru-RU', { month: 'short' })
+    .format(new Date(2020, index, 1)).replace('.', ''));
+
+  if (maxAmount === 0) return <EmptyState text="В этом году доходов и расходов пока нет." />;
+
+  return (
+    <div className="annual-chart-wrap">
+      <div className="annual-chart-legend"><span><i className="income-chart-key" />Доходы</span><span><i className="expense-chart-key" />Расходы</span></div>
+      <div className="daily-chart-scroll">
+        <svg className="annual-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Сравнение доходов и расходов по месяцам за год">
+          {[0, 1, 2, 3].map((tick) => {
+            const y = top + chartHeight * tick / 3;
+            const amount = scaleMax * (1 - tick / 3);
+            return (
+              <g key={tick}>
+                <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+                <text className="chart-axis-label" x="8" y={y + 3} textAnchor="start">{formatMoney(amount)}</text>
+              </g>
+            );
+          })}
+          {values.map(({ month, income, expenses }) => {
+            const center = left + slotWidth * (month - .5);
+            const incomeHeight = income ? Math.max(2, chartHeight * income / scaleMax) : 0;
+            const expenseHeight = expenses ? Math.max(2, chartHeight * expenses / scaleMax) : 0;
+            return (
+              <g key={month}>
+                <title>{`${monthLabels[month - 1]}: доходы ${formatMoney(income)} ₽, расходы ${formatMoney(expenses)} ₽`}</title>
+                {income > 0 && <rect className="chart-bar annual-income-bar" x={center - barWidth - 1} y={top + chartHeight - incomeHeight} width={barWidth} height={incomeHeight} rx="3" />}
+                {expenses > 0 && <rect className="chart-bar annual-expense-bar" x={center + 1} y={top + chartHeight - expenseHeight} width={barWidth} height={expenseHeight} rx="3" />}
+                <text className="chart-axis-label chart-month-label" x={center} y={height - 11} textAnchor="middle">{monthLabels[month - 1]}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function BreakdownChart({ items, total }: {
+  items: { name: string; amount: number; color?: string }[];
+  total: number;
+}) {
+  if (!items.length || total === 0) return <EmptyState text="Добавьте расход, чтобы увидеть распределение." />;
+  const maxAmount = Math.max(...items.map((item) => item.amount));
+  return (
+    <div className="chart-breakdown">
+      {items.map((item) => (
+        <div className="chart-breakdown-row" key={item.name}>
+          <div className="chart-breakdown-label">
+            <span className="chart-breakdown-name">{item.color && <i style={{ backgroundColor: item.color }} />}{item.name}</span>
+            <span className="chart-breakdown-value">{formatMoney(item.amount)} ₽ <small>{Math.round(item.amount / total * 100)}%</small></span>
+          </div>
+          <div className="chart-breakdown-track" role="progressbar" aria-label={`${item.name}: ${formatMoney(item.amount)} рублей`} aria-valuemin={0} aria-valuemax={total} aria-valuenow={item.amount}>
+            <span style={{ width: `${Math.min(100, item.amount / maxAmount * 100)}%`, ...(item.color ? { backgroundColor: item.color } : {}) }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IncomeExpenseChart({ income, expenses }: { income: number; expenses: number }) {
+  const maxAmount = Math.max(income, expenses);
+  if (maxAmount === 0) return <EmptyState text="В этом месяце доходов и расходов пока нет." />;
+  return (
+    <div className="income-expense-chart">
+      {[
+        { name: 'Доходы', amount: income, className: 'income-chart-bar' },
+        { name: 'Расходы', amount: expenses, className: 'expense-chart-bar' },
+      ].map((item) => (
+        <div className="income-expense-row" key={item.name}>
+          <div className="income-expense-label"><span>{item.name}</span><strong>{formatMoney(item.amount)} ₽</strong></div>
+          <div className="income-expense-track" role="progressbar" aria-label={item.name} aria-valuemin={0} aria-valuemax={maxAmount} aria-valuenow={item.amount}>
+            <span className={item.className} style={{ width: `${item.amount / maxAmount * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReflectionCard({ number, title, prompt, answer, onSave }: {
+  number: string;
+  title: string;
+  prompt: string;
+  answer: string;
+  onSave: (answer: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(answer);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function startEditing() {
+    setDraft(answer);
+    setError('');
+    setEditing(true);
+  }
+
+  async function saveAnswer() {
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Не удалось сохранить ответ.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <article className="reflection-card">
+      <span>{number}</span>
+      <h3>{title}</h3>
+      <p>{prompt}</p>
+      {editing ? (
+        <>
+          <label className="reflection-answer-label" htmlFor={`reflection-answer-${number}`}>
+            Ваш ответ
+            <textarea
+              id={`reflection-answer-${number}`}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value.slice(0, 5000))}
+              maxLength={5000}
+              placeholder="Запишите свои мысли…"
+            />
+          </label>
+          <div className="reflection-actions">
+            <button className="primary-button" type="button" onClick={saveAnswer} disabled={saving}>
+              {saving ? 'Сохраняем…' : 'Сохранить'} <Save size={14} />
+            </button>
+            <button className="outline-button" type="button" onClick={() => { setDraft(answer); setEditing(false); setError(''); }} disabled={saving}>
+              Отмена
+            </button>
+          </div>
+          {error && <p className="form-error" role="alert">{error}</p>}
+        </>
+      ) : (
+        <div className="reflection-answer">
+          <p className={answer ? '' : 'reflection-answer-empty'}>{answer || 'Ответ пока не записан.'}</p>
+          <button className="outline-button" type="button" onClick={startEditing}>
+            {answer ? 'Редактировать' : 'Добавить ответ'} <Pencil size={13} />
+          </button>
+        </div>
+      )}
+    </article>
+  );
 }
 
 function BudgetItemsSummary({ title, items, categoryIcons, categorySecondary = false }: {
