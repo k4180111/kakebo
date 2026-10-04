@@ -286,14 +286,18 @@ function App() {
   );
   const expenses = monthTransactions.filter((item) => item.kind === 'expense');
   const totalSpent = expenses.reduce((sum, item) => sum + item.amount, 0);
+  const mandatoryExpenses = expenses.filter((item) => item.isMandatoryExpense);
+  const mandatoryExpensesPaid = mandatoryExpenses.reduce((sum, item) => sum + item.amount, 0);
+  const variableExpenses = expenses.filter((item) => !item.isMandatoryExpense);
+  const variableExpensesSpent = variableExpenses.reduce((sum, item) => sum + item.amount, 0);
   const totalIncome = monthTransactions.filter((item) => item.kind === 'income')
     .reduce((sum, item) => sum + item.amount, 0);
   const plannedIncome = plan.incomeItems.reduce((sum, item) => sum + item.amount, 0);
   const plannedExpenses = plan.expenseItems.reduce((sum, item) => sum + item.amount, 0);
   const isBudgetConfigured = plan.incomeItems.length > 0 || plan.expenseItems.length > 0 || plan.savingsGoal > 0;
   const spendingLimit = Math.max(0, plannedIncome - plannedExpenses - plan.savingsGoal);
-  const remaining = spendingLimit - totalSpent;
-  const progress = spendingLimit > 0 ? Math.min(100, (totalSpent / spendingLimit) * 100) : 0;
+  const remaining = spendingLimit - variableExpensesSpent;
+  const progress = spendingLimit > 0 ? Math.min(100, (variableExpensesSpent / spendingLimit) * 100) : 0;
 
   useEffect(() => {
     let active = true;
@@ -505,7 +509,7 @@ function App() {
     return result;
   }, {});
   const topCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const sphereTotals = expenses.reduce<Record<string, number>>((result, item) => {
+  const sphereTotals = variableExpenses.reduce<Record<string, number>>((result, item) => {
     const sphere = item.sphere ?? 'unassigned';
     result[sphere] = (result[sphere] ?? 0) + item.amount;
     return result;
@@ -528,6 +532,7 @@ function App() {
   const selectedYear = month.slice(0, 4);
   const yearTransactions = transactions.filter((item) => item.date.startsWith(`${selectedYear}-`));
   const yearExpenses = yearTransactions.filter((item) => item.kind === 'expense');
+  const yearVariableExpenses = yearExpenses.filter((item) => !item.isMandatoryExpense);
   const yearIncome = yearTransactions.filter((item) => item.kind === 'income');
   const yearTotalSpent = yearExpenses.reduce((sum, item) => sum + item.amount, 0);
   const yearTotalIncome = yearIncome.reduce((sum, item) => sum + item.amount, 0);
@@ -535,7 +540,8 @@ function App() {
     result[item.category] = (result[item.category] ?? 0) + item.amount;
     return result;
   }, {});
-  const yearSphereTotals = yearExpenses.reduce<Record<string, number>>((result, item) => {
+  const yearVariableExpensesSpent = yearVariableExpenses.reduce((sum, item) => sum + item.amount, 0);
+  const yearSphereTotals = yearVariableExpenses.reduce<Record<string, number>>((result, item) => {
     const sphere = item.sphere ?? 'unassigned';
     result[sphere] = (result[sphere] ?? 0) + item.amount;
     return result;
@@ -695,7 +701,7 @@ function App() {
                     <div className="hero-label"><span className="tiny-leaf"><Leaf size={13} /></span> ВАШ БЮДЖЕТ НА МЕСЯЦ</div>
                     <h2>{formatMoney(remaining)} <span>₽</span></h2>
                     <p>{remaining >= 0 ? 'осталось на переменные расходы' : 'превышение плана расходов'}</p>
-                    <div className="progress-label"><span>Потрачено {formatMoney(totalSpent)} ₽</span><span>Лимит {formatMoney(spendingLimit)} ₽</span></div>
+                    <div className="progress-label"><span>Переменные расходы {formatMoney(variableExpensesSpent)} ₽</span><span>Лимит {formatMoney(spendingLimit)} ₽</span></div>
                     <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
                     <button
                       className="hero-sphere-toggle"
@@ -807,7 +813,7 @@ function App() {
                     </div>
                     <div className="breakdown-section sphere-breakdown">
                       <h4>По сферам какебо</h4>
-                      {expenses.length === 0 ? <EmptyState text="Добавьте расход, чтобы увидеть распределение по сферам." /> : (
+                      {variableExpenses.length === 0 ? <EmptyState text="Добавьте переменный расход, чтобы увидеть распределение по сферам." /> : (
                         <div className="category-list">
                           {settings.spheres.map((sphere) => {
                             const amount = sphereTotals[sphere.id] ?? 0;
@@ -816,7 +822,7 @@ function App() {
                                 <span className="category-dot" style={{ backgroundColor: sphere.color ?? defaultSphereColors[0] }} />
                                 <span className="category-name">{sphere.name}</span>
                                 <span className="category-amount">{formatMoney(amount)} ₽</span>
-                                <span className="category-percent">{totalSpent ? Math.round(amount / totalSpent * 100) : 0}%</span>
+                                <span className="category-percent">{variableExpensesSpent ? Math.round(amount / variableExpensesSpent * 100) : 0}%</span>
                               </div>
                             );
                           })}
@@ -825,7 +831,7 @@ function App() {
                               <span className="category-dot color-3" />
                               <span className="category-name">Сфера не указана</span>
                               <span className="category-amount">{formatMoney(sphereTotals.unassigned)} ₽</span>
-                              <span className="category-percent">{Math.round(sphereTotals.unassigned / totalSpent * 100)}%</span>
+                              <span className="category-percent">{Math.round(sphereTotals.unassigned / variableExpensesSpent * 100)}%</span>
                             </div>
                           )}
                         </div>
@@ -864,7 +870,7 @@ function App() {
                   </article>
                   <article className="panel chart-panel">
                     <div className="panel-heading"><div><h3>По сферам какебо</h3><p>Распределение расходов по сферам</p></div></div>
-                    <BreakdownChart items={chartSphereTotals} total={totalSpent} />
+                    <BreakdownChart items={chartSphereTotals} total={variableExpensesSpent} />
                   </article>
                   <article className="panel chart-panel chart-panel-wide">
                     <div className="panel-heading"><div><h3>Доходы и расходы</h3><p>Сравнение фактических сумм за месяц</p></div></div>
@@ -890,7 +896,7 @@ function App() {
                       </article>
                       <article className="panel chart-panel">
                         <div className="panel-heading"><div><h3>Расходы по сферам</h3><p>За весь {selectedYear} год</p></div></div>
-                        <BreakdownChart items={yearChartSphereTotals} total={yearTotalSpent} />
+                        <BreakdownChart items={yearChartSphereTotals} total={yearVariableExpensesSpent} />
                       </article>
                     </div>
                   </>
@@ -903,7 +909,7 @@ function App() {
                 <div className="plan-layout">
                   <article className="panel plan-main"><div className="panel-heading"><div><h3>{formatMonth(month)}</h3><p>Ваш план распределения дохода</p></div></div>
                     <BudgetItemsSummary title="Плановые доходы" items={plan.incomeItems} categoryIcons={settings.incomeCategoryIcons} categorySecondary />
-                    <BudgetItemsSummary title="Обязательные расходы" items={plan.expenseItems} categoryIcons={settings.expenseCategoryIcons} categorySecondary />
+                    <BudgetItemsSummary title="Обязательные расходы" items={plan.expenseItems} categoryIcons={settings.expenseCategoryIcons} categorySecondary paid={mandatoryExpensesPaid} />
                     <section className="budget-summary-section savings-goal-section">
                       <div className="budget-summary-heading">
                         <h4>Цель накоплений</h4>
@@ -1069,7 +1075,7 @@ function TransactionRows({ items, spheres, expenseCategoryIcons, incomeCategoryI
         return (
           <div className="transaction-row" key={item.id}>
             <span className={`transaction-symbol ${income ? 'income-symbol' : 'expense-symbol'}`}>{income ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span>
-            <span className="transaction-description"><strong>{item.note || item.category}</strong><small><span className="transaction-category"><CategoryIcon icon={(income ? incomeCategoryIcons : expenseCategoryIcons)?.[item.category] ?? 'tag'} />{item.category}</span>{!income && item.sphere ? ` · ${spheres.find((sphere) => sphere.id === item.sphere)?.name ?? item.sphere}` : ''}{!groupByDay ? ` · ${formatDate(item.date)}` : ''}</small></span>
+            <span className="transaction-description"><strong>{item.note || item.category}</strong><small><span className="transaction-category"><CategoryIcon icon={(income ? incomeCategoryIcons : expenseCategoryIcons)?.[item.category] ?? 'tag'} />{item.category}</span>{!income && item.isMandatoryExpense ? ' · Обязательный расход' : !income && item.sphere ? ` · ${spheres.find((sphere) => sphere.id === item.sphere)?.name ?? item.sphere}` : ''}{!groupByDay ? ` · ${formatDate(item.date)}` : ''}</small></span>
             <span className={`transaction-value ${income ? 'positive' : ''}`}>{income ? '+' : '−'}{formatMoney(item.amount)} ₽</span>
             <button className="icon-button edit-button" aria-label={`Редактировать запись «${item.note || item.category}»`} onClick={() => onEdit(item)}><Pencil size={14} /></button>
             <button className="icon-button delete-button" aria-label={`Удалить запись «${item.note || item.category}»`} onClick={() => onDelete(item.id)}><Trash2 size={15} /></button>
@@ -1302,19 +1308,29 @@ function ReflectionCard({ number, title, prompt, answer, onSave }: {
   );
 }
 
-function BudgetItemsSummary({ title, items, categoryIcons, categorySecondary = false }: {
+function BudgetItemsSummary({ title, items, categoryIcons, categorySecondary = false, paid }: {
   title: string;
   items: PlannedBudgetItem[];
   categoryIcons?: Record<string, string>;
   categorySecondary?: boolean;
+  paid?: number;
 }) {
   const total = items.reduce((sum, item) => sum + item.amount, 0);
+  const remaining = total - (paid ?? 0);
   return (
     <section className="budget-summary-section">
       <div className="budget-summary-heading">
         <h4>{title}</h4>
         <strong>{formatMoney(total)} ₽</strong>
       </div>
+      {paid !== undefined && (
+        <div className="budget-summary-paid">
+          <span>Оплачено {formatMoney(paid)} ₽</span>
+          <strong className={remaining < 0 ? 'over-budget' : ''}>
+            {remaining < 0 ? 'Сверх плана' : 'Осталось'} {formatMoney(Math.abs(remaining))} ₽
+          </strong>
+        </div>
+      )}
       {items.length ? (
         <div className="budget-summary-list">
           {[...items].sort((a, b) => a.date.localeCompare(b.date)).map((item) => (
@@ -1605,6 +1621,7 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
   const [amount, setAmount] = useState(initial ? normalizeMoneyInput(String(initial.amount / 100)) : '');
   const [category, setCategory] = useState(initial?.category ?? settings.expenseCategories[0] ?? '');
   const [sphere, setSphere] = useState(initial?.sphere ?? settings.spheres[0]?.id ?? '');
+  const [isMandatoryExpense, setIsMandatoryExpense] = useState(initial?.isMandatoryExpense ?? false);
   const [note, setNote] = useState(initial?.note ?? '');
   const [date, setDate] = useState(initial?.date ?? (month === monthKey(new Date()) ? localDateString(new Date()) : `${month}-01`));
   const [formError, setFormError] = useState('');
@@ -1615,8 +1632,12 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
     event.preventDefault();
     const amountInKopecks = rublesToKopecks(amount);
     if (!amountInKopecks) { setFormError('Введите сумму больше нуля.'); return; }
-    if (!category || (kind === 'expense' && !sphere)) {
-      setFormError('Сначала добавьте категорию и сферу в настройках.');
+    if (!category) {
+      setFormError(`Сначала добавьте категорию ${kind === 'expense' ? 'расходов' : 'доходов'} в настройках.`);
+      return;
+    }
+    if (kind === 'expense' && !isMandatoryExpense && !sphere) {
+      setFormError('Сначала добавьте сферу в настройках.');
       return;
     }
     setSaving(true);
@@ -1626,7 +1647,8 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
         kind,
         amount: amountInKopecks,
         category,
-        ...(kind === 'expense' ? { sphere } : {}),
+        ...(kind === 'expense' && isMandatoryExpense ? { isMandatoryExpense: true } : {}),
+        ...(kind === 'expense' && !isMandatoryExpense ? { sphere } : {}),
         note: note.trim(),
         date,
         createdAt: initial?.createdAt ?? new Date().toISOString(),
@@ -1643,7 +1665,7 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
 
   return <DialogFrame title={initial ? 'Редактировать запись' : 'Новая запись'} subtitle={`Запись попадёт в бюджет «${formatMonth(month)}».`} onClose={onClose}>
     <form className="dialog-form" onSubmit={submit}>
-      <div className="segmented-control"><button type="button" className={kind === 'expense' ? 'selected' : ''} onClick={() => { setKind('expense'); setCategory(settings.expenseCategories[0] ?? ''); }}>Расход</button><button type="button" className={kind === 'income' ? 'selected' : ''} onClick={() => { setKind('income'); setCategory(settings.incomeCategories[0] ?? ''); }}>Доход</button></div>
+      <div className="segmented-control"><button type="button" className={kind === 'expense' ? 'selected' : ''} onClick={() => { setKind('expense'); setCategory(settings.expenseCategories[0] ?? ''); }}>Расход</button><button type="button" className={kind === 'income' ? 'selected' : ''} onClick={() => { setKind('income'); setIsMandatoryExpense(false); setCategory(settings.incomeCategories[0] ?? ''); }}>Доход</button></div>
       <label className="field-label">Сумма, ₽<input autoFocus inputMode="decimal" placeholder="0,00" value={amount} onChange={(event) => handleMoneyInput(event, setAmount)} required /></label>
       <div className="form-row">
         <label className="field-label">Категория<select value={category} onChange={(event) => setCategory(event.target.value)}>{currentCategories.map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -1665,8 +1687,14 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
         </div>
       </div>
       {kind === 'expense' && <>
-        <label className="field-label">Сфера какебо<select value={sphere} onChange={(event) => setSphere(event.target.value)}>{currentSpheres.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <p className="field-hint">Сфера и категория не зависят друг от друга — выбирайте каждую отдельно.</p>
+        <label className="mandatory-expense-toggle">
+          <input type="checkbox" checked={isMandatoryExpense} onChange={(event) => setIsMandatoryExpense(event.target.checked)} />
+          <span><strong>Обязательный расход</strong><small>Учесть отдельно от сфер какебо и списать из плана обязательных расходов.</small></span>
+        </label>
+        {!isMandatoryExpense && <>
+          <label className="field-label">Сфера какебо<select value={sphere} onChange={(event) => setSphere(event.target.value)}>{currentSpheres.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <p className="field-hint">Сфера и категория не зависят друг от друга — выбирайте каждую отдельно.</p>
+        </>}
       </>}
       <label className="field-label">Заметка <span className="optional-label">необязательно</span><input maxLength={80} placeholder="Например, обед с друзьями" value={note} onChange={(event) => setNote(event.target.value)} /></label>
       {formError && <p className="form-error" role="alert">{formError}</p>}

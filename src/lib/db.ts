@@ -56,6 +56,7 @@ export interface MoneyTransaction {
   amount: number;
   category: string;
   sphere?: string;
+  isMandatoryExpense?: boolean;
   note: string;
   date: string;
   createdAt: string;
@@ -364,6 +365,9 @@ export function isKakeiboBackup(value: unknown): value is KakeiboBackup {
       && item.amount > 0
       && typeof item.category === 'string'
       && (item.sphere === undefined || (typeof item.sphere === 'string' && item.sphere.length > 0))
+      && (item.isMandatoryExpense === undefined
+        || (item.kind === 'expense' && typeof item.isMandatoryExpense === 'boolean'))
+      && (!item.isMandatoryExpense || item.sphere === undefined)
       && ((item as MoneyTransaction & { pillar?: unknown }).pillar === undefined
         || (typeof (item as MoneyTransaction & { pillar?: unknown }).pillar === 'string'
           && (item as MoneyTransaction & { pillar?: string }).pillar!.length > 0))
