@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -1153,13 +1154,39 @@ function SearchableSelect({ label, value, options, onChange, required = false, c
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const optionsId = useId();
   const selectedLabel = options.find((option) => option.value === value)?.label ?? '';
   const [query, setQuery] = useState(selectedLabel);
   const [open, setOpen] = useState(false);
+  const [optionsPosition, setOptionsPosition] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
   const matchingOptions = options.filter((option) => option.label.toLocaleLowerCase()
     .includes(query.trim().toLocaleLowerCase()));
+
+  function updateOptionsPosition() {
+    const bounds = inputRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const gap = 4;
+    const viewportPadding = 8;
+    const maxHeight = Math.min(350, window.innerHeight - viewportPadding * 2);
+    const below = window.innerHeight - bounds.bottom - gap - viewportPadding;
+    const above = bounds.top - gap - viewportPadding;
+    const showAbove = below < Math.min(180, maxHeight) && above > below;
+    setOptionsPosition({
+      top: showAbove
+        ? Math.max(viewportPadding, bounds.top - gap - Math.min(maxHeight, above))
+        : bounds.bottom + gap,
+      left: bounds.left,
+      width: bounds.width,
+      maxHeight: Math.max(100, Math.min(maxHeight, showAbove ? above : below)),
+    });
+  }
+
+  function openOptions() {
+    updateOptionsPosition();
+    setOpen(true);
+  }
 
   useEffect(() => {
     setQuery(selectedLabel);
@@ -1169,14 +1196,25 @@ function SearchableSelect({ label, value, options, onChange, required = false, c
   useEffect(() => {
     if (!open) return undefined;
     function dismiss(event: PointerEvent) {
-      if (event.target instanceof Node && !containerRef.current?.contains(event.target)) {
+      if (event.target instanceof Node
+        && !containerRef.current?.contains(event.target)
+        && !optionsRef.current?.contains(event.target)) {
         setOpen(false);
         setQuery(selectedLabel);
         inputRef.current?.setCustomValidity('');
       }
     }
+    function reposition() {
+      updateOptionsPosition();
+    }
     document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
   }, [open, selectedLabel]);
 
   function selectOption(option: { value: string; label: string }) {
@@ -1205,12 +1243,12 @@ function SearchableSelect({ label, value, options, onChange, required = false, c
           if (!open) {
             setQuery('');
             event.currentTarget.setCustomValidity('');
-            setOpen(true);
+            openOptions();
           }
         }}
         onChange={(event) => {
           setQuery(event.target.value);
-          setOpen(true);
+          openOptions();
           event.currentTarget.setCustomValidity(required && event.target.value !== selectedLabel
             ? 'Выберите вариант из списка.'
             : '');
@@ -1222,11 +1260,11 @@ function SearchableSelect({ label, value, options, onChange, required = false, c
             event.currentTarget.setCustomValidity('');
           } else if (event.key === 'ArrowDown' && matchingOptions.length) {
             event.preventDefault();
-            containerRef.current?.querySelector<HTMLButtonElement>('.searchable-select-option')?.focus();
+            optionsRef.current?.querySelector<HTMLButtonElement>('.searchable-select-option')?.focus();
           } else if (event.key === 'Enter' && open) {
             event.preventDefault();
             if (matchingOptions.length === 1) selectOption(matchingOptions[0]);
-            else containerRef.current?.querySelector<HTMLButtonElement>('.searchable-select-option')?.focus();
+            else optionsRef.current?.querySelector<HTMLButtonElement>('.searchable-select-option')?.focus();
           }
         }}
       />
@@ -1238,14 +1276,27 @@ function SearchableSelect({ label, value, options, onChange, required = false, c
         else {
           setQuery('');
           inputRef.current?.setCustomValidity('');
-          setOpen(true);
+          openOptions();
           inputRef.current?.focus();
         }
       }}>
         <ChevronDown size={14} />
       </button>
-      {open && (
-        <div className="searchable-select-options" id={optionsId} role="listbox" aria-label={label}>
+      {open && optionsPosition && createPortal(
+        <div
+          className="searchable-select-options searchable-select-options-portal"
+          id={optionsId}
+          role="listbox"
+          aria-label={label}
+          ref={optionsRef}
+          style={{
+            position: 'fixed',
+            top: optionsPosition.top,
+            left: optionsPosition.left,
+            width: optionsPosition.width,
+            maxHeight: optionsPosition.maxHeight,
+          }}
+        >
           {matchingOptions.length ? matchingOptions.map((option) => (
             <button
               className="searchable-select-option"
@@ -1273,7 +1324,8 @@ function SearchableSelect({ label, value, options, onChange, required = false, c
               }}
             >{option.label}</button>
           )) : <span className="searchable-select-empty">Ничего не найдено</span>}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

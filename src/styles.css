@@ -149,6 +149,7 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .searchable-select > input:focus { border-color: #a8b99e; outline: 2px solid #a8b99e33; }
 .searchable-select-trigger { position: absolute; top: 0; right: 0; display: grid; width: 32px; height: 100%; place-items: center; color: #82867b; border: 0; background: transparent; }
 .searchable-select-options { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; left: 0; display: grid; max-height: 350px; overflow-y: auto; padding: 4px; border: 1px solid #e6e5dc; border-radius: 8px; background: #fffefa; box-shadow: 0 8px 24px #34392d24; }
+.searchable-select-options-portal { z-index: 10000; right: auto; bottom: auto; }
 .searchable-select-option { min-height: 34px; padding: 6px 9px; color: #50534b; font-size: 10px; text-align: left; border: 0; border-radius: 5px; background: transparent; }
 .searchable-select-option:hover, .searchable-select-option[aria-selected="true"] { color: #35543b; background: #eff4eb; }
 .searchable-select-empty { padding: 9px; color: #909188; font-size: 10px; }
