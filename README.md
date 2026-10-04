@@ -86,10 +86,11 @@ npm run desktop:build
 
 Android-приложение собирается на основе той же веб-версии через Capacitor. На узком экране основное меню закреплено внизу; на планшетах и компьютерах сохраняется боковая навигация. Данные остаются локальными на устройстве.
 
-Чтобы собрать отладочный APK на Windows, установите Android Studio с Android SDK Platform 35, Build-Tools 35.0.0 и JDK 17 или новее, затем выполните:
+Чтобы собрать отладочный APK на Windows, установите Android Studio с Android SDK Platform 35 и Build-Tools 35.0.0. Gradle нужен JDK 17 или новее. В PowerShell задайте JDK из Android Studio и стандартную папку SDK (если Android Studio установлена в другом месте или SDK хранится отдельно, укажите свои пути):
 
-```bash
-npm install
+```powershell
+$env:JAVA_HOME = "$env:ProgramFiles\Android\Android Studio\jbr"
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 npm run android:build
 ```
 
