@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -100,6 +100,7 @@ import { decryptBackup, encryptBackup } from './lib/crypto';
 
 type Tab = 'overview' | 'history' | 'charts' | 'plan' | 'reflection' | 'settings';
 type ChartRange = 'month' | 'year';
+type BreakdownMode = 'bars' | 'pie';
 
 const categoryIconOptions: { id: typeof CATEGORY_ICON_IDS[number]; label: string; icon: LucideIcon }[] = [
   { id: 'basket', label: 'Корзина', icon: ShoppingBasket },
@@ -254,6 +255,11 @@ function handleMoneyInput(event: React.ChangeEvent<HTMLInputElement>, onChange: 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [chartRange, setChartRange] = useState<ChartRange>('month');
+  const [historyKind, setHistoryKind] = useState<'all' | TransactionKind>('all');
+  const [historyCategory, setHistoryCategory] = useState('all');
+  const [historySphere, setHistorySphere] = useState('all');
+  const [historyExpenseType, setHistoryExpenseType] = useState<'all' | 'mandatory' | 'variable'>('all');
+  const [historySearch, setHistorySearch] = useState('');
   const [month, setMonth] = useState(monthKey(new Date()));
   const [transactions, setTransactions] = useState<MoneyTransaction[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
@@ -292,12 +298,27 @@ function App() {
   const variableExpensesSpent = variableExpenses.reduce((sum, item) => sum + item.amount, 0);
   const totalIncome = monthTransactions.filter((item) => item.kind === 'income')
     .reduce((sum, item) => sum + item.amount, 0);
+  const incomeExpenseDifference = totalIncome - totalSpent;
   const plannedIncome = plan.incomeItems.reduce((sum, item) => sum + item.amount, 0);
   const plannedExpenses = plan.expenseItems.reduce((sum, item) => sum + item.amount, 0);
   const isBudgetConfigured = plan.incomeItems.length > 0 || plan.expenseItems.length > 0 || plan.savingsGoal > 0;
   const spendingLimit = Math.max(0, plannedIncome - plannedExpenses - plan.savingsGoal);
   const remaining = spendingLimit - variableExpensesSpent;
   const progress = spendingLimit > 0 ? Math.min(100, (variableExpensesSpent / spendingLimit) * 100) : 0;
+  const filteredMonthTransactions = monthTransactions.filter((item) => (
+    (historyKind === 'all' || item.kind === historyKind)
+    && (historyCategory === 'all' || item.category === historyCategory)
+    && (historySphere === 'all'
+      || (historySphere === 'unassigned'
+        ? item.kind === 'expense' && !item.sphere
+        : item.sphere === historySphere))
+    && (historyExpenseType === 'all'
+      || (historyExpenseType === 'mandatory'
+        ? item.kind === 'expense' && item.isMandatoryExpense === true
+        : item.kind === 'expense' && item.isMandatoryExpense !== true))
+    && (!historySearch.trim()
+      || `${item.note} ${item.category}`.toLocaleLowerCase().includes(historySearch.trim().toLocaleLowerCase()))
+  ));
 
   useEffect(() => {
     let active = true;
@@ -467,9 +488,14 @@ function App() {
     setBackupError('');
     setBackupMessage('');
     const passphrase = String(form.get('passphrase') ?? '');
+    const confirmation = String(form.get('passphraseConfirmation') ?? '');
     const mode = String(form.get('mode') ?? '');
     if (passphrase.length < 12) {
       setBackupError('Пароль должен содержать не менее 12 символов.');
+      return;
+    }
+    if (mode === 'export' && passphrase !== confirmation) {
+      setBackupError('Пароли не совпадают. Проверьте оба поля.');
       return;
     }
 
@@ -699,7 +725,7 @@ function App() {
                 <section className="hero-card">
                   <div className="hero-text">
                     <div className="hero-label"><span className="tiny-leaf"><Leaf size={13} /></span> ВАШ БЮДЖЕТ НА МЕСЯЦ</div>
-                    <h2>{formatMoney(remaining)} <span>₽</span></h2>
+                    <h2>{remaining < 0 && <span className="budget-minus-sign">−</span>}{formatMoney(Math.abs(remaining))} <span>₽</span></h2>
                     <p>{remaining >= 0 ? 'осталось на переменные расходы' : 'превышение плана расходов'}</p>
                     <div className="progress-label"><span>Переменные расходы {formatMoney(variableExpensesSpent)} ₽</span><span>Лимит {formatMoney(spendingLimit)} ₽</span></div>
                     <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
@@ -778,6 +804,12 @@ function App() {
                     <strong>{formatMoney(totalSpent)} <small>₽</small></strong>
                     <span className="summary-foot">за {formatMonth(month)}</span>
                   </article>
+                  <article className="summary-card">
+                    <div className="summary-icon lavender"><ArrowRight size={19} /></div>
+                    <span className="summary-label">РАЗНИЦА</span>
+                    <strong className={incomeExpenseDifference < 0 ? 'summary-negative' : ''}><SignedMoney amount={incomeExpenseDifference} /> <small>₽</small></strong>
+                    <span className="summary-foot">доходы минус расходы</span>
+                  </article>
                   <article className="summary-card savings-card">
                     <div className="summary-icon lavender"><ShieldCheck size={19} /></div>
                     <span className="summary-label">ЦЕЛЬ НАКОПЛЕНИЙ</span>
@@ -793,6 +825,12 @@ function App() {
                   </article>
                   <article className="panel category-panel">
                     <div className="panel-heading"><div><h3>Куда уходят деньги</h3><p>Два независимых взгляда на расходы</p></div><span className="panel-icon"><ChevronDown size={16} /></span></div>
+                    <div className="breakdown-section mandatory-expense-section">
+                      <div className="mandatory-expense-overview">
+                        <h4>Обязательные расходы</h4>
+                        <strong>{formatMoney(mandatoryExpensesPaid)} ₽</strong>
+                      </div>
+                    </div>
                     <div className="breakdown-section">
                       <h4>По категориям</h4>
                       {topCategories.length === 0 ? <EmptyState text="Добавьте расход, чтобы увидеть категории." /> : (
@@ -837,7 +875,7 @@ function App() {
                         </div>
                       )}
                     </div>
-                    <button className="category-footer" onClick={() => setActiveTab('history')}>Посмотреть аналитику <ArrowRight size={15} /></button>
+                    <button className="category-footer" onClick={() => { setActiveTab('charts'); setChartRange('month'); }}>Посмотреть аналитику <ArrowRight size={15} /></button>
                   </article>
                 </section>
               </>
@@ -845,7 +883,72 @@ function App() {
             {activeTab === 'history' && (
               <section className="content-section">
                 <div className="section-title-row"><div><p className="eyebrow">ВАША ИСТОРИЯ</p><h1>Операции</h1><p className="welcome-copy">Каждая запись помогает лучше понять свои привычки.</p></div><button className="primary-button" onClick={() => { setEditingTransaction(null); setTransactionOpen(true); }}><Plus size={18} /> Добавить запись</button></div>
-                <div className="panel history-panel"><TransactionRows items={monthTransactions} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} groupByDay onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} /></div>
+                <div className="history-filters panel" aria-label="Фильтры операций">
+                  <div className="history-filter-field"><span>Тип</span>
+                    <SearchableSelect
+                      label="Тип операции"
+                      value={historyKind}
+                      options={[
+                        { value: 'all', label: 'Все операции' },
+                        { value: 'income', label: 'Доходы' },
+                        { value: 'expense', label: 'Расходы' },
+                      ]}
+                      onChange={(selected) => {
+                      const value = selected as 'all' | TransactionKind;
+                      setHistoryKind(value);
+                      setHistoryCategory('all');
+                      if (value !== 'expense') setHistoryExpenseType('all');
+                      }}
+                    />
+                  </div>
+                  <div className="history-filter-field"><span>Категория</span>
+                    <SearchableSelect
+                      label="Категория"
+                      value={historyCategory}
+                      options={[
+                        { value: 'all', label: 'Все категории' },
+                        ...Array.from(new Set(monthTransactions
+                          .filter((item) => historyKind === 'all' || item.kind === historyKind)
+                          .map((item) => item.category)))
+                          .sort((a, b) => a.localeCompare(b, 'ru'))
+                          .map((category) => ({ value: category, label: category })),
+                      ]}
+                      onChange={setHistoryCategory}
+                    />
+                  </div>
+                  <div className="history-filter-field"><span>Сфера</span>
+                    <SearchableSelect
+                      label="Сфера"
+                      value={historySphere}
+                      options={[
+                        { value: 'all', label: 'Все сферы' },
+                        ...settings.spheres.map((sphere) => ({ value: sphere.id, label: sphere.name })),
+                        { value: 'unassigned', label: 'Без сферы / обязательные' },
+                      ]}
+                      onChange={setHistorySphere}
+                    />
+                  </div>
+                  <div className="history-filter-field"><span>Вид расхода</span>
+                    <SearchableSelect
+                      label="Вид расхода"
+                      value={historyExpenseType}
+                      options={[
+                        { value: 'all', label: 'Все расходы' },
+                        { value: 'mandatory', label: 'Обязательные' },
+                        { value: 'variable', label: 'Переменные' },
+                      ]}
+                      onChange={(value) => setHistoryExpenseType(value as typeof historyExpenseType)}
+                    />
+                  </div>
+                  <label className="history-filter-field history-search-field">Поиск
+                    <input type="search" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Название или заметка" />
+                  </label>
+                </div>
+                <div className="panel history-panel">
+                  {filteredMonthTransactions.length === 0
+                    ? <EmptyState text="Операций по выбранным фильтрам нет." />
+                    : <TransactionRows items={filteredMonthTransactions} spheres={settings.spheres} expenseCategoryIcons={settings.expenseCategoryIcons} incomeCategoryIcons={settings.incomeCategoryIcons} groupByDay onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} />}
+                </div>
               </section>
             )}
             {activeTab === 'charts' && (
@@ -859,8 +962,8 @@ function App() {
                 </div>
                 {chartRange === 'month' ? <div className="charts-grid">
                   <article className="panel chart-panel chart-panel-wide">
-                    <div className="panel-heading"><div><h3>Расходы по дням</h3><p>Фактические расходы за выбранный месяц</p></div><strong className="chart-total">{formatMoney(totalSpent)} ₽</strong></div>
-                    <DailyExpenseChart month={month} values={dailyExpenseTotals} />
+                    <div className="panel-heading"><div><h3>Расходы</h3><p>Фактические расходы за выбранный месяц</p></div><strong className="chart-total">{formatMoney(totalSpent)} ₽</strong></div>
+                    <ExpenseChart month={month} values={dailyExpenseTotals} items={expenses} />
                   </article>
                   <article className="panel chart-panel">
                     <div className="panel-heading"><div><h3>По категориям</h3><p>Структура расходов</p></div></div>
@@ -874,14 +977,14 @@ function App() {
                   </article>
                   <article className="panel chart-panel chart-panel-wide">
                     <div className="panel-heading"><div><h3>Доходы и расходы</h3><p>Сравнение фактических сумм за месяц</p></div></div>
-                    <IncomeExpenseChart income={totalIncome} expenses={totalSpent} />
+                    <IncomeExpenseChart income={totalIncome} expenses={totalSpent} difference={incomeExpenseDifference} />
                   </article>
                 </div> : (
                   <>
                     <section className="year-summary-grid">
                       <article className="year-summary-card"><span>Доходы за год</span><strong>{formatMoney(yearTotalIncome)} ₽</strong></article>
                       <article className="year-summary-card"><span>Расходы за год</span><strong>{formatMoney(yearTotalSpent)} ₽</strong></article>
-                      <article className="year-summary-card"><span>Разница</span><strong className={yearTotalIncome - yearTotalSpent < 0 ? 'year-negative' : ''}>{formatMoney(yearTotalIncome - yearTotalSpent)} ₽</strong></article>
+                      <article className="year-summary-card"><span>Разница</span><strong className={yearTotalIncome - yearTotalSpent < 0 ? 'year-negative' : ''}><SignedMoney amount={yearTotalIncome - yearTotalSpent} /> ₽</strong></article>
                     </section>
                     <div className="charts-grid year-charts-grid">
                       <article className="panel chart-panel chart-panel-wide">
@@ -908,8 +1011,8 @@ function App() {
                 <div className="section-title-row"><div><p className="eyebrow">НАМЕРЕНИЕ НА МЕСЯЦ</p><h1>План бюджета</h1><p className="welcome-copy">Сначала отложите на важное — остальное станет яснее.</p></div></div>
                 <div className="plan-layout">
                   <article className="panel plan-main"><div className="panel-heading"><div><h3>{formatMonth(month)}</h3><p>Ваш план распределения дохода</p></div></div>
-                    <BudgetItemsSummary title="Плановые доходы" items={plan.incomeItems} categoryIcons={settings.incomeCategoryIcons} categorySecondary />
-                    <BudgetItemsSummary title="Обязательные расходы" items={plan.expenseItems} categoryIcons={settings.expenseCategoryIcons} categorySecondary paid={mandatoryExpensesPaid} />
+                    <BudgetItemsSummary title="Плановые доходы" items={plan.incomeItems} categoryIcons={settings.incomeCategoryIcons} categorySecondary paid={totalIncome} comparisonLabel="Фактические доходы" underPlanLabel="Не получено по плану" />
+                    <BudgetItemsSummary title="Обязательные расходы" items={plan.expenseItems} categoryIcons={settings.expenseCategoryIcons} categorySecondary paid={mandatoryExpensesPaid} comparisonLabel="Факт обязательных расходов" underPlanLabel="Осталось по плану" />
                     <section className="budget-summary-section savings-goal-section">
                       <div className="budget-summary-heading">
                         <h4>Цель накоплений</h4>
@@ -1041,6 +1144,248 @@ function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>;
 }
 
+function SearchableSelect({ label, value, options, onChange, required = false, className = '' }: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  required?: boolean;
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const optionsId = useId();
+  const selectedLabel = options.find((option) => option.value === value)?.label ?? '';
+  const [query, setQuery] = useState(selectedLabel);
+  const [open, setOpen] = useState(false);
+  const matchingOptions = options.filter((option) => option.label.toLocaleLowerCase()
+    .includes(query.trim().toLocaleLowerCase()));
+
+  useEffect(() => {
+    setQuery(selectedLabel);
+    inputRef.current?.setCustomValidity('');
+  }, [selectedLabel]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function dismiss(event: PointerEvent) {
+      if (event.target instanceof Node && !containerRef.current?.contains(event.target)) {
+        setOpen(false);
+        setQuery(selectedLabel);
+        inputRef.current?.setCustomValidity('');
+      }
+    }
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [open, selectedLabel]);
+
+  function selectOption(option: { value: string; label: string }) {
+    onChange(option.value);
+    setQuery(option.label);
+    setOpen(false);
+    inputRef.current?.setCustomValidity('');
+  }
+
+  return (
+    <div className={`searchable-select ${className}`} ref={containerRef}>
+      <input
+        ref={inputRef}
+        type="text"
+        role="combobox"
+        aria-label={label}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={optionsId}
+        aria-invalid={required && query !== selectedLabel && query !== ''}
+        autoComplete="off"
+        required={required}
+        value={query}
+        placeholder="Введите для поиска"
+        onFocus={(event) => {
+          if (!open) {
+            setQuery('');
+            event.currentTarget.setCustomValidity('');
+            setOpen(true);
+          }
+        }}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+          event.currentTarget.setCustomValidity(required && event.target.value !== selectedLabel
+            ? 'Выберите вариант из списка.'
+            : '');
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setOpen(false);
+            setQuery(selectedLabel);
+            event.currentTarget.setCustomValidity('');
+          } else if (event.key === 'ArrowDown' && matchingOptions.length) {
+            event.preventDefault();
+            containerRef.current?.querySelector<HTMLButtonElement>('.searchable-select-option')?.focus();
+          } else if (event.key === 'Enter' && open) {
+            event.preventDefault();
+            if (matchingOptions.length === 1) selectOption(matchingOptions[0]);
+            else containerRef.current?.querySelector<HTMLButtonElement>('.searchable-select-option')?.focus();
+          }
+        }}
+      />
+      <button className="searchable-select-trigger" type="button" tabIndex={-1} aria-label={`Показать варианты: ${label}`} onClick={() => {
+        if (open) {
+          setOpen(false);
+          setQuery(selectedLabel);
+        }
+        else {
+          setQuery('');
+          inputRef.current?.setCustomValidity('');
+          setOpen(true);
+          inputRef.current?.focus();
+        }
+      }}>
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div className="searchable-select-options" id={optionsId} role="listbox" aria-label={label}>
+          {matchingOptions.length ? matchingOptions.map((option) => (
+            <button
+              className="searchable-select-option"
+              type="button"
+              role="option"
+              aria-selected={value === option.value}
+              key={option.value}
+              onClick={() => selectOption(option)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setOpen(false);
+                  setQuery(selectedLabel);
+                  inputRef.current?.setCustomValidity('');
+                  inputRef.current?.focus();
+                } else if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  (event.currentTarget.nextElementSibling as HTMLButtonElement | null)?.focus();
+                } else if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  const previous = event.currentTarget.previousElementSibling as HTMLButtonElement | null;
+                  if (previous) previous.focus();
+                  else inputRef.current?.focus();
+                }
+
+              }}
+            >{option.label}</button>
+          )) : <span className="searchable-select-empty">Ничего не найдено</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignedMoney({ amount }: { amount: number }) {
+  return <>{amount < 0 && <span className="negative-money-sign">−</span>}{formatMoney(Math.abs(amount))}</>;
+}
+
+function DatePicker({ label, value, fallbackMonth, min, max, onChange }: {
+  label: string;
+  value: string;
+  fallbackMonth: string;
+  min?: string;
+  max?: string;
+  onChange: (value: string) => void;
+}) {
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(value ? value.slice(0, 7) : fallbackMonth);
+  const [year, monthNumber] = visibleMonth.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const firstDayOffset = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
+  const minMonth = min?.slice(0, 7);
+  const maxMonth = max?.slice(0, 7);
+
+  useEffect(() => {
+    if (value) setVisibleMonth(value.slice(0, 7));
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function dismiss(event: PointerEvent) {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  function shiftVisibleMonth(offset: number) {
+    setVisibleMonth(monthKey(new Date(year, monthNumber - 1 + offset, 1)));
+  }
+
+  const selectedDateLabel = value ? formatPlanDate(value) : 'дд.мм.гггг';
+  const visibleMonthLabel = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' })
+    .format(new Date(year, monthNumber - 1, 1));
+
+  return (
+    <div className="date-picker plan-date-field" ref={pickerRef}>
+      <button
+        type="button"
+        className="plan-date-display"
+        aria-label={`${label}: ${value ? formatDate(value) : 'выбрать дату'}`}
+        aria-expanded={open}
+        onClick={() => {
+          if (open) setOpen(false);
+          else {
+            if (value) setVisibleMonth(value.slice(0, 7));
+            else setVisibleMonth(fallbackMonth);
+            setOpen(true);
+          }
+        }}
+      >
+        <span>{selectedDateLabel}</span>
+        <CalendarDays size={14} />
+      </button>
+      {open && (
+        <div className="date-picker-popover" role="dialog" aria-label={`Выбор даты: ${label}`}>
+          <div className="date-picker-heading">
+            <button type="button" aria-label="Предыдущий месяц" disabled={!!minMonth && visibleMonth <= minMonth} onClick={() => shiftVisibleMonth(-1)}><ArrowLeft size={14} /></button>
+            <strong>{visibleMonthLabel}</strong>
+            <button type="button" aria-label="Следующий месяц" disabled={!!maxMonth && visibleMonth >= maxMonth} onClick={() => shiftVisibleMonth(1)}><ArrowRight size={14} /></button>
+          </div>
+          <div className="date-picker-grid date-picker-weekdays" aria-hidden="true">
+            {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((weekday, index) => (
+              <span className={index > 4 ? 'date-picker-weekend' : ''} key={weekday}>{weekday}</span>
+            ))}
+          </div>
+          <div className="date-picker-grid">
+            {Array.from({ length: firstDayOffset }, (_, index) => <span className="date-picker-empty" key={`empty-${index}`} />)}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1;
+              const date = `${visibleMonth}-${String(day).padStart(2, '0')}`;
+              const weekday = new Date(year, monthNumber - 1, day).getDay();
+              const isWeekend = weekday === 0 || weekday === 6;
+              const disabled = (!!min && date < min) || (!!max && date > max);
+              return (
+                <button
+                  type="button"
+                  className={`date-picker-day ${isWeekend ? 'date-picker-weekend' : ''} ${value === date ? 'selected' : ''}`}
+                  key={date}
+                  aria-label={new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(year, monthNumber - 1, day))}
+                  aria-pressed={value === date}
+                  disabled={disabled}
+                  onClick={() => { onChange(date); setOpen(false); }}
+                >{day}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CategoryIcon({ icon, className = '' }: { icon: string; className?: string }) {
   const Icon = categoryIcons[icon] ?? Tag;
   return <Icon className={className} size={15} strokeWidth={1.8} aria-hidden="true" />;
@@ -1072,8 +1417,13 @@ function TransactionRows({ items, spheres, expenseCategoryIcons, incomeCategoryI
       }).format(new Date(`${date}T00:00:00`))}</h2>}
       {dayItems.map((item) => {
         const income = item.kind === 'income';
+        const sphereColor = spheres.find((sphere) => sphere.id === item.sphere)?.color ?? '#aeb5a7';
         return (
-          <div className="transaction-row" key={item.id}>
+          <div
+            className="transaction-row"
+            key={item.id}
+            style={{ borderLeftColor: income ? '#78bce0' : item.isMandatoryExpense ? '#d7a27d' : sphereColor }}
+          >
             <span className={`transaction-symbol ${income ? 'income-symbol' : 'expense-symbol'}`}>{income ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span>
             <span className="transaction-description"><strong>{item.note || item.category}</strong><small><span className="transaction-category"><CategoryIcon icon={(income ? incomeCategoryIcons : expenseCategoryIcons)?.[item.category] ?? 'tag'} />{item.category}</span>{!income && item.isMandatoryExpense ? ' · Обязательный расход' : !income && item.sphere ? ` · ${spheres.find((sphere) => sphere.id === item.sphere)?.name ?? item.sphere}` : ''}{!groupByDay ? ` · ${formatDate(item.date)}` : ''}</small></span>
             <span className={`transaction-value ${income ? 'positive' : ''}`}>{income ? '+' : '−'}{formatMoney(item.amount)} ₽</span>
@@ -1090,10 +1440,31 @@ function PlanLine({ title, amount }: { title: string; amount: number }) {
   return <div className="plan-line"><span>{title}</span><span>{formatMoney(amount)} ₽</span></div>;
 }
 
-function DailyExpenseChart({ month, values }: {
+function ExpenseChart({ month, values, items }: {
   month: string;
   values: { day: number; amount: number }[];
+  items: MoneyTransaction[];
 }) {
+  const [period, setPeriod] = useState<'day' | 'week'>('day');
+  const [year, monthNumber] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const firstWeekOffset = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
+  const weekCount = Math.ceil((firstWeekOffset + daysInMonth) / 7);
+  const weeklyValues = Array.from({ length: weekCount }, (_, index) => {
+    const firstDay = Math.max(1, index * 7 - firstWeekOffset + 1);
+    const lastDay = Math.min(daysInMonth, index * 7 - firstWeekOffset + 7);
+    return {
+      day: index + 1,
+      label: `${firstDay}–${lastDay}`,
+      amount: items.reduce((sum, item) => {
+        const day = Number(item.date.slice(8, 10));
+        return Math.floor((day - 1 + firstWeekOffset) / 7) === index ? sum + item.amount : sum;
+      }, 0),
+    };
+  });
+  const chartValues = period === 'day'
+    ? values.map(({ day, amount }) => ({ day, label: String(day), amount }))
+    : weeklyValues;
   const width = 720;
   const height = 230;
   const left = 56;
@@ -1102,42 +1473,51 @@ function DailyExpenseChart({ month, values }: {
   const bottom = 35;
   const chartHeight = height - top - bottom;
   const chartWidth = width - left - right;
-  const maxAmount = Math.max(0, ...values.map((item) => item.amount));
+  const maxAmount = Math.max(0, ...chartValues.map((item) => item.amount));
   const scaleMax = maxAmount || 1;
-  const slotWidth = chartWidth / values.length;
+  const slotWidth = chartWidth / chartValues.length;
   const barWidth = Math.min(18, slotWidth * 0.62);
-  const labelInterval = values.length > 24 ? 5 : values.length > 12 ? 3 : 1;
-
-  if (maxAmount === 0) return <EmptyState text="В этом месяце расходов пока нет." />;
+  const labelInterval = period === 'day' ? values.length > 24 ? 5 : values.length > 12 ? 3 : 1 : 1;
 
   return (
-    <div className="daily-chart-scroll">
-      <svg className="daily-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Расходы по дням за ${formatMonth(month)}`}>
-        {[0, 1, 2, 3].map((tick) => {
-          const y = top + chartHeight * tick / 3;
-          const amount = scaleMax * (1 - tick / 3);
-          return (
-            <g key={tick}>
-              <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
-              <text className="chart-axis-label" x="8" y={y + 3} textAnchor="start">{formatMoney(amount)}</text>
-            </g>
-          );
-        })}
-        {values.map(({ day, amount }) => {
-          const barHeight = amount ? Math.max(2, chartHeight * amount / scaleMax) : 0;
-          const x = left + slotWidth * (day - 1) + (slotWidth - barWidth) / 2;
-          const y = top + chartHeight - barHeight;
-          const showLabel = day === 1 || day % labelInterval === 0 || day === values.length;
-          return (
-            <g key={day}>
-              <title>{`${day} ${formatMonth(month).split(' ')[0]}: ${formatMoney(amount)} ₽`}</title>
-              {amount > 0 && <rect className="chart-bar" x={x} y={y} width={barWidth} height={barHeight} rx={Math.min(4, barWidth / 2)} />}
-              {showLabel && <text className="chart-axis-label chart-day-label" x={left + slotWidth * (day - .5)} y={height - 10} textAnchor="middle">{day}</text>}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
+    <>
+      <div className="segmented-control expense-chart-period" role="group" aria-label="Период расходов">
+        <button type="button" className={period === 'day' ? 'selected' : ''} aria-pressed={period === 'day'} onClick={() => setPeriod('day')}>По дням</button>
+        <button type="button" className={period === 'week' ? 'selected' : ''} aria-pressed={period === 'week'} onClick={() => setPeriod('week')}>По неделям</button>
+      </div>
+      {maxAmount === 0 ? <EmptyState text="В этом месяце расходов пока нет." /> : (
+        <div className="daily-chart-scroll">
+          <svg className="daily-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Расходы ${period === 'day' ? 'по дням' : 'по неделям'} за ${formatMonth(month)}`}>
+            {[0, 1, 2, 3].map((tick) => {
+              const y = top + chartHeight * tick / 3;
+              const amount = scaleMax * (1 - tick / 3);
+              return (
+                <g key={tick}>
+                  <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+                  <text className="chart-axis-label" x="8" y={y + 3} textAnchor="start">{formatMoney(amount)}</text>
+                </g>
+              );
+            })}
+            {chartValues.map(({ day, label, amount }) => {
+              const barHeight = amount ? Math.max(2, chartHeight * amount / scaleMax) : 0;
+              const x = left + slotWidth * (day - 1) + (slotWidth - barWidth) / 2;
+              const y = top + chartHeight - barHeight;
+              const showLabel = period === 'week' || day === 1 || day % labelInterval === 0 || day === values.length;
+              const titleLabel = period === 'day'
+                ? `${day} ${formatMonth(month).split(' ')[0]}`
+                : `Неделя ${day}: ${weeklyValues[day - 1].label} ${new Intl.DateTimeFormat('ru-RU', { month: 'short' }).format(new Date(year, monthNumber - 1, 1))}`;
+              return (
+                <g key={day}>
+                  <title>{`${titleLabel}: ${formatMoney(amount)} ₽`}</title>
+                  {amount > 0 && <rect className="chart-bar" x={x} y={y} width={barWidth} height={barHeight} rx={Math.min(4, barWidth / 2)} />}
+                  {showLabel && <text className="chart-axis-label chart-day-label" x={left + slotWidth * (day - .5)} y={height - 10} textAnchor="middle">{label}</text>}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1199,28 +1579,58 @@ function BreakdownChart({ items, total }: {
   items: { name: string; amount: number; color?: string }[];
   total: number;
 }) {
+  const [mode, setMode] = useState<BreakdownMode>('bars');
+  const palette = ['#79b8d5', '#d47770', '#88a77f', '#d7a27d', '#a39bbd', '#d1bd70', '#6f8f98', '#b47b8c'];
+  const coloredItems = items.map((item, index) => ({ ...item, color: item.color ?? palette[index % palette.length] }));
+  const pieSegments: string[] = [];
+  let pieProgress = 0;
+  for (const item of coloredItems) {
+    const next = pieProgress + item.amount / total * 100;
+    pieSegments.push(`${item.color} ${pieProgress}% ${next}%`);
+    pieProgress = next;
+  }
   if (!items.length || total === 0) return <EmptyState text="Добавьте расход, чтобы увидеть распределение." />;
-  const maxAmount = Math.max(...items.map((item) => item.amount));
   return (
-    <div className="chart-breakdown">
-      {items.map((item) => (
-        <div className="chart-breakdown-row" key={item.name}>
-          <div className="chart-breakdown-label">
-            <span className="chart-breakdown-name">{item.color && <i style={{ backgroundColor: item.color }} />}{item.name}</span>
-            <span className="chart-breakdown-value">{formatMoney(item.amount)} ₽ <small>{Math.round(item.amount / total * 100)}%</small></span>
+    <div className={`chart-breakdown ${mode === 'pie' ? 'chart-breakdown-pie-mode' : ''}`}>
+      <div className="segmented-control chart-mode-toggle" role="group" aria-label="Вид диаграммы">
+        <button type="button" className={mode === 'bars' ? 'selected' : ''} aria-pressed={mode === 'bars'} onClick={() => setMode('bars')}>Полосы</button>
+        <button type="button" className={mode === 'pie' ? 'selected' : ''} aria-pressed={mode === 'pie'} onClick={() => setMode('pie')}>Круговая</button>
+      </div>
+      {mode === 'pie' ? (
+        <div className="pie-chart-layout">
+          <div className="pie-chart" role="img" aria-label={`Круговая диаграмма расходов на ${formatMoney(total)} рублей`} style={{ background: `conic-gradient(${pieSegments.join(', ')})` }}>
+            <span><strong>{formatMoney(total)}</strong><small>₽ всего</small></span>
           </div>
-          <div className="chart-breakdown-track" role="progressbar" aria-label={`${item.name}: ${formatMoney(item.amount)} рублей`} aria-valuemin={0} aria-valuemax={total} aria-valuenow={item.amount}>
-            <span style={{ width: `${Math.min(100, item.amount / maxAmount * 100)}%`, ...(item.color ? { backgroundColor: item.color } : {}) }} />
+          <div className="pie-chart-legend">
+            {coloredItems.map((item) => (
+              <div className="pie-chart-legend-item" key={item.name}>
+                <span className="pie-chart-legend-name"><i style={{ backgroundColor: item.color }} />{item.name}</span>
+                <strong>{formatMoney(item.amount)} ₽ <small>{Math.round(item.amount / total * 100)}%</small></strong>
+              </div>
+            ))}
           </div>
         </div>
-      ))}
+      ) : (
+        <div className="chart-breakdown-rows">
+          {coloredItems.map((item) => (
+            <div className="chart-breakdown-row" key={item.name}>
+              <div className="chart-breakdown-label">
+                <span className="chart-breakdown-name"><i style={{ backgroundColor: item.color }} />{item.name}</span>
+                <span className="chart-breakdown-value">{formatMoney(item.amount)} ₽ <small>{Math.round(item.amount / total * 100)}%</small></span>
+              </div>
+              <div className="chart-breakdown-track" role="progressbar" aria-label={`${item.name}: ${formatMoney(item.amount)} рублей`} aria-valuemin={0} aria-valuemax={total} aria-valuenow={item.amount}>
+                <span style={{ width: `${Math.min(100, item.amount / total * 100)}%`, backgroundColor: item.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function IncomeExpenseChart({ income, expenses }: { income: number; expenses: number }) {
+function IncomeExpenseChart({ income, expenses, difference }: { income: number; expenses: number; difference: number }) {
   const maxAmount = Math.max(income, expenses);
-  if (maxAmount === 0) return <EmptyState text="В этом месяце доходов и расходов пока нет." />;
   return (
     <div className="income-expense-chart">
       {[
@@ -1229,11 +1639,15 @@ function IncomeExpenseChart({ income, expenses }: { income: number; expenses: nu
       ].map((item) => (
         <div className="income-expense-row" key={item.name}>
           <div className="income-expense-label"><span>{item.name}</span><strong>{formatMoney(item.amount)} ₽</strong></div>
-          <div className="income-expense-track" role="progressbar" aria-label={item.name} aria-valuemin={0} aria-valuemax={maxAmount} aria-valuenow={item.amount}>
-            <span className={item.className} style={{ width: `${item.amount / maxAmount * 100}%` }} />
+          <div className="income-expense-track" role="progressbar" aria-label={item.name} aria-valuemin={0} aria-valuemax={maxAmount || 1} aria-valuenow={item.amount}>
+            <span className={item.className} style={{ width: `${maxAmount ? item.amount / maxAmount * 100 : 0}%` }} />
           </div>
         </div>
       ))}
+      <div className={`income-expense-difference ${difference < 0 ? 'negative-difference' : ''}`}>
+        <span>Разница (доходы − расходы)</span>
+        <strong><SignedMoney amount={difference} /> ₽</strong>
+      </div>
     </div>
   );
 }
@@ -1308,12 +1722,14 @@ function ReflectionCard({ number, title, prompt, answer, onSave }: {
   );
 }
 
-function BudgetItemsSummary({ title, items, categoryIcons, categorySecondary = false, paid }: {
+function BudgetItemsSummary({ title, items, categoryIcons, categorySecondary = false, paid, comparisonLabel, underPlanLabel = 'Осталось по плану' }: {
   title: string;
   items: PlannedBudgetItem[];
   categoryIcons?: Record<string, string>;
   categorySecondary?: boolean;
   paid?: number;
+  comparisonLabel?: string;
+  underPlanLabel?: string;
 }) {
   const total = items.reduce((sum, item) => sum + item.amount, 0);
   const remaining = total - (paid ?? 0);
@@ -1325,9 +1741,9 @@ function BudgetItemsSummary({ title, items, categoryIcons, categorySecondary = f
       </div>
       {paid !== undefined && (
         <div className="budget-summary-paid">
-          <span>Оплачено {formatMoney(paid)} ₽</span>
-          <strong className={remaining < 0 ? 'over-budget' : ''}>
-            {remaining < 0 ? 'Сверх плана' : 'Осталось'} {formatMoney(Math.abs(remaining))} ₽
+          <span>{comparisonLabel ?? 'Факт обязательных расходов'}: {formatMoney(paid)} ₽</span>
+          <strong className={remaining > 0 ? 'over-budget' : ''}>
+            {remaining < 0 ? 'Сверх плана' : underPlanLabel} {formatMoney(Math.abs(remaining))} ₽
           </strong>
         </div>
       )}
@@ -1668,23 +2084,14 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
       <div className="segmented-control"><button type="button" className={kind === 'expense' ? 'selected' : ''} onClick={() => { setKind('expense'); setCategory(settings.expenseCategories[0] ?? ''); }}>Расход</button><button type="button" className={kind === 'income' ? 'selected' : ''} onClick={() => { setKind('income'); setIsMandatoryExpense(false); setCategory(settings.incomeCategories[0] ?? ''); }}>Доход</button></div>
       <label className="field-label">Сумма, ₽<input autoFocus inputMode="decimal" placeholder="0,00" value={amount} onChange={(event) => handleMoneyInput(event, setAmount)} required /></label>
       <div className="form-row">
-        <label className="field-label">Категория<select value={category} onChange={(event) => setCategory(event.target.value)}>{currentCategories.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <div className="field-label">Дата
-          <span className="plan-date-field">
-            <span className="plan-date-display" aria-hidden="true">
-              <span>{formatPlanDate(date)}</span>
-              <CalendarDays size={14} />
-            </span>
-            <input
-              aria-label="Дата"
-              lang="ru-RU"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              required
-            />
-          </span>
-        </div>
+        <div className="field-label"><span>Категория</span><SearchableSelect
+          label="Категория"
+          value={category}
+          options={currentCategories.map((item) => ({ value: item, label: item }))}
+          onChange={setCategory}
+          required
+        /></div>
+        <label className="field-label">Дата<DatePicker label="Дата" value={date} fallbackMonth={month} onChange={setDate} /></label>
       </div>
       {kind === 'expense' && <>
         <label className="mandatory-expense-toggle">
@@ -1692,7 +2099,13 @@ function TransactionDialog({ month, settings, initial, onClose, onSave }: {
           <span><strong>Обязательный расход</strong><small>Учесть отдельно от сфер какебо и списать из плана обязательных расходов.</small></span>
         </label>
         {!isMandatoryExpense && <>
-          <label className="field-label">Сфера какебо<select value={sphere} onChange={(event) => setSphere(event.target.value)}>{currentSpheres.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <div className="field-label"><span>Сфера какебо</span><SearchableSelect
+            label="Сфера какебо"
+            value={sphere}
+            options={currentSpheres.map((item) => ({ value: item.id, label: item.name }))}
+            onChange={setSphere}
+            required
+          /></div>
           <p className="field-hint">Сфера и категория не зависят друг от друга — выбирайте каждую отдельно.</p>
         </>}
       </>}
@@ -2015,28 +2428,28 @@ function PlanDialog({ month, initial, incomeCategories, expenseCategories, onClo
             </div>
             {items.map((item, index) => (
               <div className="plan-item-fields" key={item.id}>
-                <select aria-label={`${title}: категория ${index + 1}`} value={item.category} onChange={(event) => updateItem(kind, item.id, 'category', event.target.value)} required>
-                  {!item.category && <option value="" disabled>Выберите</option>}
-                  {item.category && !categories.includes(item.category) && <option value={item.category}>{item.category} (архивная)</option>}
-                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-                </select>
+                <SearchableSelect
+                  className="plan-category-select"
+                  label={`${title}: категория ${index + 1}`}
+                  value={item.category}
+                  options={[
+                    ...(item.category && !categories.includes(item.category)
+                      ? [{ value: item.category, label: `${item.category} (архивная)` }]
+                      : []),
+                    ...categories.map((category) => ({ value: category, label: category })),
+                  ]}
+                  onChange={(value) => updateItem(kind, item.id, 'category', value)}
+                  required
+                />
                 <input aria-label={`${title}: сумма ${index + 1}`} inputMode="decimal" placeholder="0,00" value={item.amount} onChange={(event) => handleMoneyInput(event, (value) => updateItem(kind, item.id, 'amount', value))} />
-                <label className="plan-date-field">
-                  <span className="plan-date-display" aria-hidden="true">
-                    <span>{item.date || 'дд.мм.гггг'}</span>
-                    <CalendarDays size={14} />
-                  </span>
-                  <input
-                    aria-label={`${title}: дата ${index + 1}`}
-                    lang="ru-RU"
-                    type="date"
-                    min={`${month}-01`}
-                    max={`${month}-${String(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()).padStart(2, '0')}`}
-                    value={parsePlanDate(item.date) ?? ''}
-                    onChange={(event) => updateItem(kind, item.id, 'date', event.target.value ? formatPlanDate(event.target.value) : '')}
-                    required
-                  />
-                </label>
+                <DatePicker
+                  label={`${title}: дата ${index + 1}`}
+                  value={parsePlanDate(item.date) ?? ''}
+                  fallbackMonth={month}
+                  min={`${month}-01`}
+                  max={`${month}-${String(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()).padStart(2, '0')}`}
+                  onChange={(value) => updateItem(kind, item.id, 'date', formatPlanDate(value))}
+                />
                 <input aria-label={`${title}: примечание ${index + 1}`} maxLength={80} placeholder={kind === 'income' ? 'Например, аванс' : 'Например, аренда квартиры'} value={item.note} onChange={(event) => updateItem(kind, item.id, 'note', event.target.value)} />
                 <button className="icon-button plan-item-delete" type="button" aria-label={`Удалить запись ${index + 1} в разделе «${title}»`} onClick={() => removeItem(kind, item.id)}><Trash2 size={15} /></button>
               </div>
@@ -2078,6 +2491,7 @@ function BackupDialog({ initialMode, error, message, onClose, onSubmit }: { init
         <label className="replace-warning"><input name="confirmReplace" type="checkbox" required /> Текущие данные будут заменены данными из копии.</label>
       </>}
       <label className="field-label">Пароль шифрования<input name="passphrase" type="password" autoComplete="new-password" minLength={12} placeholder="Не менее 12 символов" required /></label>
+      {mode === 'export' && <label className="field-label">Повторите пароль<input name="passphraseConfirmation" type="password" autoComplete="new-password" minLength={12} placeholder="Введите пароль ещё раз" required /></label>}
       <input type="hidden" name="mode" value={mode} />
       <div className="encryption-note"><LockKeyhole size={17} /><span>Шифрование AES-256-GCM. Мы не храним и не можем восстановить ваш пароль. Сохраните его отдельно.</span></div>
       {error && <p className="form-error" role="alert">{error}</p>}
