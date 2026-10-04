@@ -590,7 +590,7 @@ function App() {
         <div className="side-label">МЕНЮ</div>
         <nav className="side-nav" aria-label="Основная навигация">
           {navItems.map(({ id, title, icon: Icon }) => (
-            <button key={id} aria-label={title} className={`nav-link ${activeTab === id ? 'active' : ''}`} onClick={() => setActiveTab(id)}>
+            <button key={id} aria-label={title} aria-current={activeTab === id ? 'page' : undefined} className={`nav-link ${activeTab === id ? 'active' : ''}`} onClick={() => setActiveTab(id)}>
               <Icon size={18} strokeWidth={1.8} /><span>{title}</span>
               {activeTab === id && <span className="active-dot" />}
             </button>
@@ -602,7 +602,7 @@ function App() {
             <p>«Маленькие шаги каждый день создают большие перемены»</p>
             <span className="quote-caption">ВАШЕ НАПОМИНАНИЕ</span>
           </div>
-          <button aria-label="Настройки" className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+          <button aria-label="Настройки" aria-current={activeTab === 'settings' ? 'page' : undefined} className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
             <Settings2 size={18} strokeWidth={1.8} /><span>Настройки</span>
           </button>
           <div className="local-status"><span className="status-dot" /> Данные хранятся на устройстве</div>
