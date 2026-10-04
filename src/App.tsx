@@ -1344,13 +1344,39 @@ function DatePicker({ label, value, fallbackMonth, min, max, onChange }: {
   onChange: (value: string) => void;
 }) {
   const pickerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [visibleMonth, setVisibleMonth] = useState(value ? value.slice(0, 7) : fallbackMonth);
   const [year, monthNumber] = visibleMonth.split('-').map(Number);
   const daysInMonth = new Date(year, monthNumber, 0).getDate();
   const firstDayOffset = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
   const minMonth = min?.slice(0, 7);
   const maxMonth = max?.slice(0, 7);
+
+  function updatePopoverPosition() {
+    const trigger = pickerRef.current?.querySelector('button');
+    const bounds = trigger?.getBoundingClientRect();
+    if (!bounds) return;
+    const viewportPadding = 8;
+    const popoverWidth = Math.min(260, window.innerWidth - viewportPadding * 2);
+    const estimatedHeight = 290;
+    const spaceBelow = window.innerHeight - bounds.bottom - 5 - viewportPadding;
+    const spaceAbove = bounds.top - 5 - viewportPadding;
+    const showAbove = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
+    setPopoverPosition({
+      top: showAbove
+        ? Math.max(viewportPadding, bounds.top - Math.min(estimatedHeight, spaceAbove) - 5)
+        : bounds.bottom + 5,
+      left: Math.max(viewportPadding, Math.min(bounds.right - popoverWidth, window.innerWidth - popoverWidth - viewportPadding)),
+      width: popoverWidth,
+    });
+  }
+
+  function openCalendar() {
+    updatePopoverPosition();
+    setOpen(true);
+  }
 
   useEffect(() => {
     if (value) setVisibleMonth(value.slice(0, 7));
@@ -1359,16 +1385,28 @@ function DatePicker({ label, value, fallbackMonth, min, max, onChange }: {
   useEffect(() => {
     if (!open) return undefined;
     function dismiss(event: PointerEvent) {
-      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setOpen(false);
+      if (event.target instanceof Node
+        && !pickerRef.current?.contains(event.target)
+        && !popoverRef.current?.contains(event.target)) setOpen(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        pickerRef.current?.querySelector('button')?.focus();
+      }
+    }
+    function reposition() {
+      updatePopoverPosition();
     }
     document.addEventListener('pointerdown', dismiss);
     document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
     return () => {
       document.removeEventListener('pointerdown', dismiss);
       document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
   }, [open]);
 
@@ -1392,15 +1430,26 @@ function DatePicker({ label, value, fallbackMonth, min, max, onChange }: {
           else {
             if (value) setVisibleMonth(value.slice(0, 7));
             else setVisibleMonth(fallbackMonth);
-            setOpen(true);
+            openCalendar();
           }
         }}
       >
         <span>{selectedDateLabel}</span>
         <CalendarDays size={14} />
       </button>
-      {open && (
-        <div className="date-picker-popover" role="dialog" aria-label={`Выбор даты: ${label}`}>
+      {open && popoverPosition && createPortal(
+        <div
+          className="date-picker-popover date-picker-popover-portal"
+          role="dialog"
+          aria-label={`Выбор даты: ${label}`}
+          ref={popoverRef}
+          style={{
+            position: 'fixed',
+            top: popoverPosition.top,
+            left: popoverPosition.left,
+            width: popoverPosition.width,
+          }}
+        >
           <div className="date-picker-heading">
             <button type="button" aria-label="Предыдущий месяц" disabled={!!minMonth && visibleMonth <= minMonth} onClick={() => shiftVisibleMonth(-1)}><ArrowLeft size={14} /></button>
             <strong>{visibleMonthLabel}</strong>
@@ -1432,7 +1481,8 @@ function DatePicker({ label, value, fallbackMonth, min, max, onChange }: {
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

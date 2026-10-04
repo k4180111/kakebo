@@ -453,6 +453,7 @@ h1 { margin-bottom: 8px; font: 700 29px/1.25 Manrope, sans-serif; letter-spacing
 .date-picker { z-index: 1; }
 .date-picker:has(.date-picker-popover) { z-index: 40; }
 .date-picker-popover { position: absolute; z-index: 41; top: calc(100% + 5px); right: 0; width: 260px; padding: 11px; border: 1px solid #e6e5dc; border-radius: 10px; background: #fffefa; box-shadow: 0 10px 26px #34392d24; }
+.date-picker-popover-portal { z-index: 10001; right: auto; bottom: auto; max-height: calc(100vh - 16px); overflow-y: auto; }
 .date-picker-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .date-picker-heading strong { color: #4d5048; font: 700 11px Manrope, sans-serif; text-transform: capitalize; }
 .date-picker-heading button { display: grid; width: 26px; height: 26px; place-items: center; color: #73766e; border: 1px solid #ebeae3; border-radius: 7px; background: #fffefa; }
